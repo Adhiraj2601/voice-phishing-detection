@@ -29,8 +29,8 @@ jobs:
       - name: Install system audio dependencies (Ubuntu)
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg libsndfile1
+          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout="15" || true
+          sudo apt-get install -y --no-install-recommends ffmpeg libsndfile1 || true
 
       - name: Install dependencies
         run: |
