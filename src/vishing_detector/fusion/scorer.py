@@ -219,7 +219,7 @@ class RiskScorer:
         first_alert_time = None
         for a in assessments:
             if a.smoothed_risk >= self.th_elevated:
-                first_alert_time = a.start_time
+                first_alert_time = round(a.end_time, 2)
                 break
 
         # Aggregate detected cues

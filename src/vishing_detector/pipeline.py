@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Generator, List, Optional, Union
 
 import yaml
+from pydub import AudioSegment
 
 from vishing_detector.anomaly.detector import AcousticAnomalyDetector
 from vishing_detector.asr.transcriber import Transcriber, get_transcriber
@@ -175,17 +176,25 @@ class VishingDetectionPipeline:
 
     def stream_file(
         self,
-        file_path: Union[str, Path],
+        file_path: Optional[Union[str, Path]] = None,
+        preloaded_segment: Optional[AudioSegment] = None,
     ) -> Generator[StreamingEvent, None, None]:
         """Process an audio file in simulated real-time, yielding StreamingEvents per window.
 
         Args:
-            file_path: Path to the target audio file.
+            file_path: Optional path to the target audio file.
+            preloaded_segment: Optional preloaded AudioSegment.
 
         Yields:
             StreamingEvent for each time window.
         """
-        segment, _ = self.loader.load(file_path)
+        if preloaded_segment is not None:
+            segment = preloaded_segment
+        elif file_path is not None:
+            segment, _ = self.loader.load(file_path)
+        else:
+            raise ValueError("Either file_path or preloaded_segment must be provided.")
+
         self.scorer.reset()
 
         cumulative_texts: List[str] = []
@@ -258,7 +267,7 @@ class VishingDetectionPipeline:
         segment, _ = self.loader.load(file_path)
         duration_sec = len(segment) / 1000.0
 
-        for event in self.stream_file(file_path):
+        for event in self.stream_file(preloaded_segment=segment):
             assessments.append(event.assessment)
             final_transcript = event.cumulative_transcript
 
