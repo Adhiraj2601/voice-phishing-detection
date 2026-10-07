@@ -1,11 +1,13 @@
-"""Generates large-scale synthetic telephony audio datasets for vishing detection.
+"""Generates synthetic telephony audio datasets for vishing detection.
 
 Features:
 - >= 100 clips per class for held-out evaluation (benign vs. vishing).
 - Hard negatives: Benign calls legitimately mentioning banks, OTPs, or deliveries to challenge false positives.
-- Multiple TTS voice personas with strictly held-out voices and held-out scripts for the test split.
-- Telephony simulation on the test set: 8 kHz downsampling, G.711 u-law codec compression,
-  telecom band-pass filtering (300 Hz - 3400 Hz), and line noise.
+- Distinct voice personas: 8 acoustic variations synthesized from Windows SAPI5 TTS
+  (modulated via SAPI rate, Librosa pitch-shift, and formant adjustments), with 4 held out for test.
+- Telephony simulation applied across ALL splits (train, val, test): 8 kHz downsampling,
+  G.711 u-law codec compression, telecom band-pass filtering (300 Hz - 3400 Hz), and line noise.
+- Separate train (benign baseline), validation (benign + scam for calibration), and test splits.
 """
 
 from __future__ import annotations
@@ -111,8 +113,41 @@ SCAM_TEST_SCRIPTS = [
     "Windows defender security team: malicious ransomware detected on your network. Grant remote access via UltraViewer to prevent disk erasure.",
 ]
 
+VAL_BENIGN_SCRIPTS = [
+    "Hi, I am calling to follow up on the status of my home insurance policy renewal.",
+    "Good morning, could you let me know if the community swimming pool is open today?",
+    "Hello, this is David checking if our flight connection in Denver has been delayed.",
+    "Hi mom, I will be arriving home around six PM so please don't wait for dinner.",
+    "Hello, I am calling the library to check if the audiobooks are available for renewal.",
+    "Hey, can you confirm whether the team presentation is scheduled for room B tomorrow?",
+    "Hi doctor, I am calling to confirm my annual health checkup appointment on Friday.",
+    "Good afternoon, I wanted to ask about the return policy for clothing purchased online.",
+    "Hey, did you remember to turn off the garden sprinkler before leaving the house?",
+    "Hello customer service, I am inquiring about tracking information for order five four three.",
+]
+
+VAL_HARD_NEGATIVE_SCRIPTS = [
+    "Hi, I got a text message with an authentication code. Did someone try to log into my account?",
+    "Hey, our bank texted me asking if I authorized an online purchase. Should I confirm it?",
+    "Hello, I am calling my credit card company to report that my card was lost yesterday.",
+    "Could you tell me why the mobile app is asking to re-enter my debit card PIN number?",
+    "Mom, someone called claiming to be from tech support, but I hung up immediately.",
+]
+
+VAL_SCAM_SCRIPTS = [
+    "This is internal security at Chase. Suspicious debit activity was detected. Read back your OTP code now.",
+    "IRS enforcement bureau: your property is under lien. Pay the settlement fine via Target gift cards immediately.",
+    "Windows security alert: critical spyware active. Download AnyDesk and grant remote access to our technician.",
+    "Federal Trade Commission warning: your accounts are frozen. Wire funds to our safe custody account right now.",
+    "Amazon fraud alert: thousand dollar charge pending. Tell me your credit card CVV and billing zip code.",
+]
+
 # ---------------------------------------------------------------------------
 # Voice Persona Definitions
+# Note: These 8 speaker personas represent systematic rate (-2 to +2) and
+# pitch (-4.0 to +3.5 semitones) acoustic modulations synthesized from
+# a single Windows SAPI5 voice engine. 4 are reserved for training/validation,
+# and 4 distinct acoustic profiles are held out exclusively for testing.
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -248,23 +283,30 @@ def _synthesize_harmonic_fallback(text: str, out_wav: Path, sr: int = 16000, f0_
 def generate_large_scale_dataset(
     output_dir: Path = Path("data/synthetic"),
     num_benign_train: int = 60,
+    num_benign_val: int = 20,
+    num_scam_val: int = 20,
     num_benign_test: int = 110,
     num_scam_test: int = 110,
 ) -> Dict[str, Any]:
-    """Generate extensive telephony-simulated dataset exceeding 100 clips per class.
+    """Generate telephony-simulated dataset with train, val, and held-out test splits.
 
     Includes:
-    - Train split: strictly benign recordings using training voice personas.
-    - Test split: held-out benign recordings, held-out hard negatives, and held-out scam recordings
-      using held-out voice personas and simulated 8 kHz G.711 telephony compression.
+    - Train split: strictly benign recordings for acoustic baseline training.
+    - Val split: benign (including hard negatives) and scam calls for threshold calibration and fusion tuning.
+    - Test split: held-out benign recordings (with hard negatives) and held-out scam recordings
+      using held-out voice personas and scripts.
+    - Uniform telephony simulation across ALL splits: 8 kHz downsampling, G.711 u-law companding,
+      band-pass filter (300-3400 Hz), and line noise.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     raw_dir = output_dir / "raw_tts"
     raw_dir.mkdir(parents=True, exist_ok=True)
 
     train_dir = output_dir / "train"
+    val_dir = output_dir / "val"
     test_dir = output_dir / "test"
     train_dir.mkdir(parents=True, exist_ok=True)
+    val_dir.mkdir(parents=True, exist_ok=True)
     test_dir.mkdir(parents=True, exist_ok=True)
 
     train_personas = [p for p in VOICE_PERSONAS if not p.is_test_heldout]
@@ -273,7 +315,7 @@ def generate_large_scale_dataset(
     tts_jobs: List[Dict[str, Any]] = []
     manifest: List[Dict[str, Any]] = []
 
-    # 1. Benign Training Set (Train Split)
+    # 1. Benign Training Set (Train Split - Telephony Simulated)
     logger.info("Scheduling %d benign training clips...", num_benign_train)
     for i in range(num_benign_train):
         script = BENIGN_TRAIN_SCRIPTS[i % len(BENIGN_TRAIN_SCRIPTS)]
@@ -284,8 +326,37 @@ def generate_large_scale_dataset(
 
         tts_jobs.append({"text": script, "persona": persona, "wav_path": raw_path, "target_path": target_path, "split": "train", "label": 0, "is_hard_negative": False})
 
-    # 2. Benign Test Set (Held-Out Test Split, including Hard Negatives)
-    num_hard_neg = int(num_benign_test * 0.45) # ~50 hard negatives
+    # 2. Validation Set (For Anomaly Calibration and Fusion Tuning)
+    num_val_hard_neg = int(num_benign_val * 0.40)
+    num_val_std_benign = num_benign_val - num_val_hard_neg
+    logger.info("Scheduling %d validation clips (%d benign [%d hard neg] + %d scam)...", num_benign_val + num_scam_val, num_benign_val, num_val_hard_neg, num_scam_val)
+
+    for i in range(num_val_std_benign):
+        script = VAL_BENIGN_SCRIPTS[i % len(VAL_BENIGN_SCRIPTS)]
+        persona = train_personas[i % len(train_personas)]
+        filename = f"val_benign_{i+1:03d}.wav"
+        target_path = val_dir / filename
+        raw_path = raw_dir / f"raw_val_benign_{i+1:03d}.wav"
+        tts_jobs.append({"text": script, "persona": persona, "wav_path": raw_path, "target_path": target_path, "split": "val", "label": 0, "is_hard_negative": False})
+
+    for i in range(num_val_hard_neg):
+        script = VAL_HARD_NEGATIVE_SCRIPTS[i % len(VAL_HARD_NEGATIVE_SCRIPTS)]
+        persona = train_personas[i % len(train_personas)]
+        filename = f"val_benign_hard_{i+1:03d}.wav"
+        target_path = val_dir / filename
+        raw_path = raw_dir / f"raw_val_benign_hard_{i+1:03d}.wav"
+        tts_jobs.append({"text": script, "persona": persona, "wav_path": raw_path, "target_path": target_path, "split": "val", "label": 0, "is_hard_negative": True})
+
+    for i in range(num_scam_val):
+        script = VAL_SCAM_SCRIPTS[i % len(VAL_SCAM_SCRIPTS)]
+        persona = train_personas[i % len(train_personas)]
+        filename = f"val_scam_{i+1:03d}.wav"
+        target_path = val_dir / filename
+        raw_path = raw_dir / f"raw_val_scam_{i+1:03d}.wav"
+        tts_jobs.append({"text": script, "persona": persona, "wav_path": raw_path, "target_path": target_path, "split": "val", "label": 1, "is_hard_negative": False})
+
+    # 3. Held-Out Test Set (Telephony Simulated)
+    num_hard_neg = int(num_benign_test * 0.45) # ~49 hard negatives
     num_standard_benign_test = num_benign_test - num_hard_neg
     logger.info("Scheduling %d held-out benign test clips (%d standard + %d hard negatives)...", num_benign_test, num_standard_benign_test, num_hard_neg)
 
@@ -307,7 +378,7 @@ def generate_large_scale_dataset(
 
         tts_jobs.append({"text": script, "persona": persona, "wav_path": raw_path, "target_path": target_path, "split": "test", "label": 0, "is_hard_negative": True})
 
-    # 3. Scam Test Set (Held-Out Test Split)
+    # 4. Scam Test Set (Held-Out Test Split)
     logger.info("Scheduling %d held-out scam test clips...", num_scam_test)
     for i in range(num_scam_test):
         script = SCAM_TEST_SCRIPTS[i % len(SCAM_TEST_SCRIPTS)]
@@ -322,13 +393,12 @@ def generate_large_scale_dataset(
     logger.info("Synthesizing %d total speech clips...", len(tts_jobs))
     _batch_synthesize_tts_windows(tts_jobs, raw_dir)
 
-    # Process acoustic perturbations & telephony simulation
-    logger.info("Applying acoustic persona shifts and telephony simulation...")
+    # Process acoustic perturbations & uniform telephony simulation
+    logger.info("Applying acoustic persona shifts and uniform telephony channel simulation...")
     for job in tts_jobs:
         raw_p = job["wav_path"]
         target_p = job["target_path"]
         persona: VoicePersona = job["persona"]
-        is_test = job["split"] == "test"
         label = job["label"]
 
         # Ensure raw audio exists
@@ -347,12 +417,9 @@ def generate_large_scale_dataset(
             if label == 1:
                 y = librosa.effects.time_stretch(y, rate=random.choice([1.06, 1.12, 1.18]))
 
-            # On the test set, apply full telephony channel simulation (8 kHz + G.711 u-law + bandpass + noise)
-            if is_test:
-                y = apply_telephony_simulation(y, sr=16000, snr_db=random.uniform(20.0, 28.0))
-                codec_desc = "g711_mulaw_8k_simulated"
-            else:
-                codec_desc = "linear_pcm_16k"
+            # Apply identical telephony channel simulation across ALL splits (8 kHz + G.711 u-law + bandpass + noise)
+            y = apply_telephony_simulation(y, sr=16000, snr_db=random.uniform(20.0, 28.0))
+            codec_desc = "g711_mulaw_8k_simulated"
 
             # Write finalized 16 kHz WAV
             sf.write(str(target_p), y, sr, subtype="PCM_16")
@@ -397,16 +464,19 @@ def generate_large_scale_dataset(
         shutil.copyfile(test_dir / "test_scam_001.wav", samples_dir / "sample_scam.wav")
 
     train_count = sum(1 for m in manifest if m["split"] == "train")
+    val_count = sum(1 for m in manifest if m["split"] == "val")
     test_benign = sum(1 for m in manifest if m["split"] == "test" and m["label"] == 0)
     test_scam = sum(1 for m in manifest if m["split"] == "test" and m["label"] == 1)
-    hard_neg_count = sum(1 for m in manifest if m.get("is_hard_negative", False))
+    hard_neg_count = sum(1 for m in manifest if m.get("is_hard_negative", False) and m["split"] == "test")
 
     logger.info(
         "Dataset Generation Complete!\n"
-        "  - Train Set: %d benign clips\n"
+        "  - Train Set: %d benign telephony clips\n"
+        "  - Val Set: %d telephony clips\n"
         "  - Test Set: %d total clips (%d benign [%d hard negatives] + %d vishing)\n"
         "  - Manifest: %s",
         train_count,
+        val_count,
         test_benign + test_scam,
         test_benign,
         hard_neg_count,
@@ -417,6 +487,7 @@ def generate_large_scale_dataset(
     return {
         "manifest_path": str(manifest_path),
         "train_count": train_count,
+        "val_count": val_count,
         "test_count": test_benign + test_scam,
         "test_benign": test_benign,
         "test_scam": test_scam,
@@ -425,9 +496,11 @@ def generate_large_scale_dataset(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Large-scale synthetic dataset generator for vishing detection.")
+    parser = argparse.ArgumentParser(description="Synthetic telephony dataset generator for vishing detection.")
     parser.add_argument("--output-dir", type=str, default="data/synthetic", help="Output directory path")
     parser.add_argument("--train-benign", type=int, default=60, help="Number of benign training samples")
+    parser.add_argument("--val-benign", type=int, default=20, help="Number of benign validation samples")
+    parser.add_argument("--val-scam", type=int, default=20, help="Number of scam validation samples")
     parser.add_argument("--test-benign", type=int, default=110, help="Number of benign test samples (>= 100)")
     parser.add_argument("--test-scam", type=int, default=110, help="Number of scam test samples (>= 100)")
     args = parser.parse_args()
@@ -435,6 +508,8 @@ if __name__ == "__main__":
     generate_large_scale_dataset(
         output_dir=Path(args.output_dir),
         num_benign_train=args.train_benign,
+        num_benign_val=args.val_benign,
+        num_scam_val=args.val_scam,
         num_benign_test=args.test_benign,
         num_scam_test=args.test_scam,
     )

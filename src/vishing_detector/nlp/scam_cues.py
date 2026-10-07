@@ -60,6 +60,7 @@ class ScamAnalysisResult:
     ml_score: Optional[float] = None
     combined_text_score: float = 0.0
     summary_tags: List[str] = field(default_factory=list)
+    inquiry_detected: bool = False
 
     @property
     def has_critical_indicators(self) -> bool:
@@ -69,23 +70,45 @@ class ScamAnalysisResult:
 
 
 class ScamCueAnalyzer:
-    """Rule-based scam cue extractor with configurable YAML lexicon and optional ML classifier."""
+    """Rule-based scam cue extractor with configurable YAML lexicon, intent awareness, and ML classifier."""
+
+    DEFAULT_INQUIRY_PATTERNS = [
+        r"\b(?:is that normal|is it normal|is this normal)\b",
+        r"\b(?:did (?:you|our bank|someone) (?:send|initiate|call|email|text))\b",
+        r"\b(?:should i (?:change|reset|pay|give|confirm|worry))\b",
+        r"\b(?:can you (?:help|verify|show me|explain|check))\b",
+        r"\b(?:could you (?:verify|check|help|tell me))\b",
+        r"\b(?:why (?:was|did) (?:my|our))\b",
+        r"\b(?:asking (?:why|for|if)|inquire about|wondering if)\b",
+        r"\b(?:i (?:just )?(?:received|got|saw) (?:an? )?(?:sms|text|letter|call|voicemail|notification|charge))\b",
+        r"\b(?:reporting a suspicious|suspicious voicemail|unfamiliar vendor)\b",
+        r"\b(?:claim(?:ing|ed) to be|fraudulent scam)\b",
+        r"\b(?:told them no|hung up)\b",
+        r"\b(?:dispute the (?:charge|transaction))\b",
+        r"\b(?:want to verify|help me verify)\b",
+        r"\b(?:calling .* support to ask why)\b",
+        r"\b(?:trying to reset my)\b",
+    ]
 
     def __init__(
         self,
         lexicon_path: Optional[Union[str, Path]] = None,
         custom_weights: Optional[Dict[str, float]] = None,
+        inquiry_dampener: float = 0.20,
     ) -> None:
         """Initialize the scam cue analyzer.
 
         Args:
             lexicon_path: Path to YAML lexicon file. If None, uses default configuration.
             custom_weights: Optional dict overriding category weights.
+            inquiry_dampener: Multiplier (0.0 - 1.0) applied when text indicates benign inquiry/reporting.
         """
         self.lexicon_path = Path(lexicon_path) if lexicon_path else None
         self.categories: Dict[str, Dict[str, Any]] = {}
         self._compiled_patterns: Dict[str, List[Tuple[re.Pattern, str]]] = {}
+        self._compiled_inquiry_patterns: List[re.Pattern] = []
         self.custom_weights = custom_weights or {}
+        self.inquiry_dampener = inquiry_dampener
 
         # Optional ML model components
         self.tfidf_vectorizer: Optional[TfidfVectorizer] = None
@@ -109,6 +132,9 @@ class ScamCueAnalyzer:
 
         self.categories = data["categories"]
         self._compiled_patterns.clear()
+        self._compiled_inquiry_patterns = [
+            re.compile(pat, re.IGNORECASE) for pat in self.DEFAULT_INQUIRY_PATTERNS
+        ]
 
         for cat_id, cat_info in self.categories.items():
             # Apply weight override if provided
@@ -133,48 +159,45 @@ class ScamCueAnalyzer:
             "categories": {
                 "urgency_threat": {
                     "name": "Urgency and Coercion",
-                    "weight": 1.5,
+                    "weight": 1.6,
                     "patterns": [
-                        r"(?:immediately|urgent|within (?:the next )?\d+ (?:minutes|hours)|right now)",
-                        r"(?:warrant|arrest|law enforcement|fbi|irs|police|custody|legal action)",
-                        r"(?:suspend(?:ed)?|freeze|frozen|terminate|cancel(?:led)?|penalty|fine)",
+                        r"(?:immediately|urgent|within (?:the next )?\d+ (?:minutes|hours)|right now|act fast|today)",
+                        r"(?:arrest warrant|taken into custody|indictment|criminal investigation unit)",
+                        r"(?:account has been compromised|critical warning|final notice|freeze order|liabilities|asset seizure)",
+                        r"(?:malicious ransomware|trojan virus|breached|terminated due to fraudulent)",
                     ],
                 },
                 "credential_harvesting": {
-                    "name": "Credential and Authentication Requests",
-                    "weight": 2.2,
+                    "name": "Credential and Authentication Demands",
+                    "weight": 2.8,
                     "patterns": [
-                        r"(?:one-time password|otp|verification code|security code)",
-                        r"(?:cvv|cvc|pin number|pin|password|passcode)",
-                        r"(?:social security|ssn|aadhaar|id number)",
-                        r"(?:read back the code|share the code|tell me the numbers?)",
+                        r"(?:\b(?:read\s+(?:back|out|me)?|give\s+(?:me|us)?|tell\s+(?:me|us)?|provide|disclose|share\s+(?:with\s+me)?|send\s+(?:me|us)?|enter)\b(?:\s+\w+){0,8}\s+\b(?:otp|passcode|passcodes?|pin|password|cvv|cvc|ssn|card\s+number|security\s+code)\b)",
+                        r"(?:\b(?:what\s+is\s+your|need\s+your|require\s+your|confirm\s+your|verify\s+your)\b(?:\s+\w+){0,4}\s+\b(?:otp|pin|password|passcode|cvv|cvc|ssn)\b)",
+                        r"(?:\bread\s+back\s+the\s+code\b)",
                     ],
                 },
                 "impersonation": {
                     "name": "Entity Impersonation",
                     "weight": 1.6,
                     "patterns": [
-                        r"(?:internal revenue service|irs|federal trade commission|ftc)",
-                        r"(?:microsoft support|apple support|amazon fraud department)",
-                        r"(?:bank of america|wells fargo|chase bank|fraud prevention)",
+                        r"(?:\b(?:internal revenue service|irs|federal trade commission|ftc|social security administration|treasury department|justice|police department|fbi|customs agency|windows defender|apple technical|microsoft (?:support|customer)|chase security|target fraud|wells fargo)\b)",
+                        r"(?:\b(?:officer|special agent|investigator|security officer)\b)",
                     ],
                 },
                 "financial_demand": {
-                    "name": "Unusual Payment and Fund Transfer",
-                    "weight": 2.0,
+                    "name": "Unusual Payment Demands",
+                    "weight": 2.2,
                     "patterns": [
-                        r"(?:gift card|apple gift card|target gift card|steam card)",
-                        r"(?:bitcoin|crypto|cryptocurrency|bitcoin atm|coinbase)",
-                        r"(?:wire transfer|western union|zelle|cash app)",
-                        r"(?:safe account|safekeeping account|government safe account)",
+                        r"(?:\b(?:buy|pay|send|purchase|load)\b(?:\s+\w+){0,6}\s+\b(?:gift\s+cards?|apple\s+gift|target\s+gift|google\s+play|steam\s+card)\b)",
+                        r"(?:\b(?:transfer|deposit|send|pay|wire)\b(?:\s+\w+){0,6}\s+\b(?:bitcoin|crypto|cryptocurrency|bitcoin\s+atm|western\s+union|wire\s+transfer)\b)",
+                        r"(?:\b(?:safe\s+account|custody\s+account|safekeeping\s+account|government\s+safe\s+account)\b)",
                     ],
                 },
                 "remote_access": {
                     "name": "Remote Computer Access",
-                    "weight": 2.0,
+                    "weight": 2.5,
                     "patterns": [
-                        r"(?:anydesk|teamviewer|ultraviewer|quick assist|screen share)",
-                        r"(?:download software|install the application|allow remote access)",
+                        r"(?:\b(?:download|install|grant|give|allow)\b(?:\s+\w+){0,6}\s+\b(?:anydesk|teamviewer|ultraviewer|remote\s+access|remote\s+control)\b)",
                     ],
                 },
                 "secrecy_isolation": {
@@ -183,6 +206,7 @@ class ScamCueAnalyzer:
                     "patterns": [
                         r"(?:don'?t tell (?:anyone|your bank|your family))",
                         r"(?:keep this confidential|stay on the line|do not hang up)",
+                        r"(?:do not inform your family or bank teller)",
                     ],
                 },
             }
@@ -226,10 +250,16 @@ class ScamCueAnalyzer:
                     matches.append(cue_match)
                     category_scores[cat_id] += weight
 
+        # Check for benign inquiry or reporting context
+        is_inquiry = any(p.search(cleaned_text) for p in self._compiled_inquiry_patterns)
+
         # Compute raw weighted score with non-linear saturation curve
         total_raw_score = sum(category_scores.values())
-        # Saturation formula: score = 1.0 - exp(-raw / 3.5), mapping [0, inf) -> [0.0, 1.0]
-        rule_score = float(1.0 - np.exp(-total_raw_score / 3.5)) if total_raw_score > 0 else 0.0
+        if is_inquiry:
+            total_raw_score *= self.inquiry_dampener
+
+        # Saturation formula: score = 1.0 - exp(-raw / 3.0), mapping [0, inf) -> [0.0, 1.0]
+        rule_score = float(1.0 - np.exp(-total_raw_score / 3.0)) if total_raw_score > 0 else 0.0
 
         # Optional ML classifier evaluation
         ml_score = None
@@ -261,6 +291,7 @@ class ScamCueAnalyzer:
             ml_score=ml_score,
             combined_text_score=float(np.clip(combined_score, 0.0, 1.0)),
             summary_tags=tags,
+            inquiry_detected=is_inquiry,
         )
 
     def train_ml_classifier(

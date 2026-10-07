@@ -40,9 +40,9 @@ flowchart TD
 
 - **Telephony Ingestion & Streaming Simulation**: Normalizes volume to -20 dBFS, strips silence, and partitions audio into overlapping sliding windows (3.0s window, 1.0s hop) to emulate low-latency streaming call monitoring.
 - **119-Dimensional Acoustic Profiling**: Extracts Mel-Frequency Cepstral Coefficients (MFCCs 1–13 + $\Delta$ + $\Delta\Delta$), 12-bin Chroma, spectral centroid, spectral bandwidth, spectral rolloff, spectral contrast, zero-crossing rate, RMS energy, fundamental frequency ($F_0$) via the YIN algorithm, and speech-to-pause prosody metrics.
-- **Unsupervised Vocal Anomaly Detection**: Uses `IsolationForest` and `One-Class SVM` trained strictly on benign speech recordings to flag abnormal vocal tension, unnatural pitch modulation, or synthesized speech patterns without requiring labeled attack audio.
+- **Acoustic Anomaly Detection**: Employs `IsolationForest` and `One-Class SVM` trained on benign telephony speech baselines to detect acoustic distribution shifts without requiring labeled attack audio.
 - **Offline & Swappable Speech Recognition**: Standardized on **Vosk** (Kaldi-based) for offline, privacy-first transcription. Runs on CPU with ~40 MB footprint, requires zero cloud dependencies, and delivers word-level timestamps without needing multi-gigabyte GPU models. The architecture provides an abstract `Transcriber` interface allowing plug-and-play swapping.
-- **Explainable Scam Cue NLP Engine**: Evaluates urgency and threats, credential harvesting (OTP, PIN, CVV, passwords), authority impersonation (IRS, police, bank fraud department), unconventional payments (gift cards, Bitcoin ATMs, wire transfers), remote desktop access (AnyDesk, TeamViewer), and secrecy tactics. Lexicon is modularized in `config/scam_lexicon.yaml`.
+- **Intent-Aware Scam Cue NLP Engine**: Evaluates urgency and threats, credential demands (OTP, PIN, CVV, passwords), authority impersonation, unconventional payments (gift cards, Bitcoin ATMs, wire transfers), remote desktop access, and secrecy tactics. Requires directive demand verbs near credential terms and applies inquiry dampening to distinguish victim questions from attacker demands.
 - **Multi-Modal Risk Scorer**: Combines acoustic anomalies and lexical cues with synergy gating, exponential moving average smoothing, and actionable alerts (*Safe*, *Low*, *Elevated*, *High*, *Critical*).
 - **Interactive Streamlit Web Dashboard**: Live audio playback, waveform/mel-spectrogram inspection, real-time threat timeline, and highlighted keyword transcripts.
 
@@ -50,35 +50,34 @@ flowchart TD
 
 ## Evaluation Benchmark & Component Ablation
 
-The system was evaluated on a rigorous, held-out telephony-simulated benchmark dataset ($N = 220$ test clips):
-- **Multiple Voice Personas**: Generated across distinct synthetic speaker personas with strictly **held-out voices and held-out scripts** in the test split.
-- **Telephony Channel Simulation**: All test clips are downsampled to **8 kHz**, compressed using the standard **ITU-T G.711 $\mu$-law** telephony codec, shaped with a **300 Hz – 3400 Hz** band-pass filter, and mixed with additive telephone line noise (SNR = 20–28 dB).
-- **Hard Negatives ($N = 49$)**: Benign conversational calls that legitimately discuss banks, OTPs, password resets, or deliveries (e.g. *"I just got an OTP code from my bank, is that normal?"*, *"The courier is asking for the delivery PIN"*). These deliberately stress-test false alarm susceptibility.
+The system was evaluated on a synthetic telephony benchmark ($N = 220$ held-out test clips, 110 per class):
+- **Speaker Personas**: 8 acoustic profiles synthesized from a single Windows SAPI5 voice engine via systematic rate (-2 to +2), pitch (-4.0 to +3.5 semitones), and formant scaling. Four profiles are used for training/validation, and four distinct profiles are held out exclusively for testing.
+- **Telephony Channel Simulation**: Applied uniformly across training, validation, and testing splits via **8 kHz** downsampling, ITU-T **G.711 $\mu$-law** codec compression, **300 Hz – 3400 Hz** band-pass filtering, and additive telephone line noise (SNR = 20–28 dB).
+- **Hard Negatives ($N = 49$)**: Benign conversational calls that legitimately discuss banks, OTPs, password resets, or deliveries (e.g. *"I just got an OTP code from my bank, is that normal?"*, *"The courier is outside asking for the delivery PIN"*). These deliberately test false alarm susceptibility.
 
 ### Component Ablation Study
 
-| Model Variant | Precision | Recall | F1 Score | ROC-AUC | Hard-Neg FPR | Mean Latency |
+| Model Variant | Precision | Recall | F1 Score | ROC-AUC | Hard-Neg FPR (N=49) | Mean Latency |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Acoustic-Only (Vocal Anomaly)** | 0.5000 | 1.0000 | 0.6667 | 0.8434 | 100.0% | 3.00s |
-| **Text-Only (Scam Lexicon Rules)** | 0.7372 | 0.9182 | 0.8178 | 0.9012 | 73.5% | 3.36s |
-| **Fused Multi-Modal (Our Method)** | **0.7372** | **0.9182** | **0.8178** | **0.9368** | **73.5%** | **3.00s** |
+| **Acoustic-Only (Acoustic Anomaly)** | 0.6623 | 0.4636 | 0.5455 | 0.6509 | 20.4% | 5.04s |
+| **Text-Only (Scam Lexicon Rules)** | 0.8871 | 1.0000 | 0.9402 | 1.0000 | 18.4% | 3.00s |
+| **Fused Multi-Modal** | **0.9167** | **1.0000** | **0.9565** | **1.0000** | **10.2%** | **3.00s** |
 
-### Key Forensic Insights:
-1. **Acoustic-Only Trade-off**: Under telephony downsampling (8 kHz) and G.711 codec compression, acoustic anomaly detection achieves high sensitivity (Recall = 1.0000, ROC-AUC = 0.8434) but lower precision (0.5000). Telephony channel artifacts cause acoustic-only models to flag both benign and scam calls if evaluated in isolation.
-2. **Text-Only False Alarms on Hard Negatives**: Purely lexical matching detects vishing attacks effectively (Recall = 0.9182), but triggers false positives on conversations legitimately discussing security codes or banking questions (Hard-Negative FPR = 73.5%).
-3. **Multi-Modal Superiority**: The fused architecture achieves the highest overall discrimination (**ROC-AUC = 0.9368**) and faster detection latency (**3.00s**, triggering alerts on the initial 3-second streaming window).
+### Evaluation Findings:
+1. **Acoustic Model Limitations**: Acoustic anomaly detection is the weakest standalone component (ROC-AUC = 0.6509, F1 = 0.5455). Training on telephony-simulated audio prevents the severe distribution mismatch that otherwise causes 100% false alarms, but acoustic features alone provide modest discriminatory signal on synthetic voices.
+2. **Text-Driven Alerts & Inflated Recall**: The intent-aware lexicon detects scripted scam patterns reliably, but the perfect text recall (1.0000) is an upper-bound artifact of the synthetic benchmark: the regex patterns and the synthetic scam scripts were designed with shared domain assumptions. In-the-wild phrasing and paraphrased social engineering will yield lower recall.
+3. **Hard Negatives as the Core Challenge**: Disambiguating malicious credential harvesting from legitimate customer questions is the primary design hurdle. An intent-aware lexicon (requiring demand verbs such as *"read back"* or *"give me"*, while down-weighting inquiry phrasing like *"is that normal"* or *"did you send"*) reduces hard-negative false alarms from 73.5% down to 18.4% in text-only and 10.2% (5/49) when fused.
+4. **Role of Fusion**: Fused scoring improves precision (0.9167 vs 0.8871) and cuts hard-negative false alarms roughly in half relative to text alone. However, alert decisions remain predominantly text-driven; acoustic anomaly scores act as a secondary filter rather than an independent decision-maker.
 
 ### Evaluation Visualizations
 
-<p align="center">
-  <img src="docs/figures/roc_curve.png" width="48%" alt="Multi-Model ROC Curves" />
-  <img src="docs/figures/ablation_comparison.png" width="48%" alt="Ablation Benchmark Comparison" />
-</p>
+| Multi-Modal ROC Curves | Component Ablation Comparison |
+| :---: | :---: |
+| ![ROC Curves](docs/figures/roc_curve.png) | ![Ablation Comparison](docs/figures/ablation_comparison.png) |
 
-<p align="center">
-  <img src="docs/figures/score_over_time.png" width="48%" alt="Streaming Threat Progression" />
-  <img src="docs/figures/confusion_matrix.png" width="48%" alt="Confusion Matrix" />
-</p>
+| Streaming Threat Progression | Confusion Matrix |
+| :---: | :---: |
+| ![Score Over Time](docs/figures/score_over_time.png) | ![Confusion Matrix](docs/figures/confusion_matrix.png) |
 
 ---
 
@@ -200,10 +199,11 @@ voice-phishing-detection/
 
 ## Honest Limitations & Edge Cases
 
-1. **Synthetic Benchmark Scope**: Evaluations reported here reflect a controlled synthetic benchmark ($N = 220$) designed with held-out voices, G.711 $\mu$-law compression, and hard negative conversational scripts. Real-world telecom traffic exhibits wider acoustic diversity (packet loss, jitter, speaker accents, background noise).
-2. **False Positives on Hard Negatives**: Legitimate conversations where users discuss fraud attempts (e.g., calling family to ask about an OTP text) contain trigger keywords. Acoustic features provide complementary signal, but conversational context classifiers (intent parsing) are needed to further suppress hard negative false alarms.
-3. **Telephony Codec Distortion**: Aggressive 8 kHz downsampling truncates higher-frequency vocal harmonics above 4 kHz, reducing the discriminative fidelity of acoustic spectral features compared to high-fidelity audio.
-4. **Language Coverage**: The current default lexicon and Vosk model target English. Extending to multilingual telephony requires corresponding language models and translated indicator patterns.
+1. **Sample Size & Synthetic Benchmark Scope**: Evaluations reflect a small synthetic telephony benchmark ($N = 110$ per class, $N = 220$ total) synthesized using pitch- and rate-modulated SAPI5 speech with G.711 $\mu$-law compression and line noise. Real-world telecom environments present far wider acoustic diversity (packet loss, jitter, speaker emotional distress, accented English).
+2. **Lexicon-Script Shared Knowledge Bias**: The high text recall (1.0000) reported on this benchmark is an upper bound: the evaluation scripts and regex lexicon were authored using overlapping domain knowledge. In-the-wild social engineering involves novel and adversarial phrasing that will degrade lexical recall.
+3. **Hard Negatives as the Core Vulnerability**: While intent-aware demand filtering and acoustic gating cut hard-negative false alarms down to 10.2% (5 of 49 test calls), false alarms on benign calls discussing financial security remain the primary open problem. Resolving this without cloud dependencies requires compact local semantic intent classifiers.
+4. **Telephony Channel Degradation & Real Corpora**: Narrowband 8 kHz telephony downsampling discards vocal frequencies above 3.4 kHz, reducing the discriminative fidelity of acoustic spectral features. Future validation on authentic telephone speech corpora (such as the *Switchboard-1 Telephone Speech Corpus via LDC*) is necessary before production deployment.
+5. **Language Coverage**: The current default lexicon and Vosk model target English. Extending to multilingual telephony requires language-specific ASR acoustic models and translated indicator lexicons.
 
 ---
 

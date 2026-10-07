@@ -1,56 +1,54 @@
 # Voice Phishing (Vishing) Indicator Lexicon
-# Categorized with associated risk weights and regex/phrase patterns
+# Categorized with associated risk weights and intent-aware regex patterns
+# Intent-Aware Design:
+# - Credential extraction requires imperative demand phrasing (e.g., 'read back', 'give me', 'tell me your')
+# - Payment demands require transactional directive verbs (e.g., 'buy', 'pay', 'transfer', 'send')
+# - Authority impersonation detects organizational claiming phrases
+# - Benign inquiries (e.g., questions about codes received) are handled via inquiry suppression in the analyzer.
 
 categories:
   urgency_threat:
     name: "Urgency and Coercion"
-    weight: 1.5
+    weight: 1.6
     patterns:
-      - "(?:immediately|urgent|within (?:the next )?\\d+ (?:minutes|hours)|right now|act fast)"
-      - "(?:warrant|arrest|law enforcement|fbi|irs|police|custody|legal action)"
-      - "(?:suspend(?:ed)?|freeze|frozen|terminate|cancel(?:led)?|penalty|fine)"
-      - "(?:before it'?s too late|critical warning|final notice)"
+      - "(?:immediately|urgent|within (?:the next )?\\d+ (?:minutes|hours)|right now|act fast|today)"
+      - "(?:arrest warrant|taken into custody|indictment|criminal investigation unit)"
+      - "(?:account has been compromised|critical warning|final notice|freeze order|liabilities|asset seizure)"
+      - "(?:malicious ransomware|trojan virus|breached|terminated due to fraudulent)"
 
   credential_harvesting:
-    name: "Credential and Authentication Requests"
-    weight: 2.2
+    name: "Credential and Authentication Demands"
+    weight: 2.8
     patterns:
-      - "(?:one-time password|one time password|otp|verification code|security code)"
-      - "(?:cvv|cvc|pin number|pin|password|passcode|secret answer)"
-      - "(?:social security|ssn|national insurance|aadhaar|id number)"
-      - "(?:read back the code|share the code|tell me the numbers?)"
+      - "(?:\\b(?:read\\s+(?:back|out|me)?|give\\s+(?:me|us)?|tell\\s+(?:me|us)?|provide|disclose|share\\s+(?:with\\s+me)?|send\\s+(?:me|us)?|enter)\\b(?:\\s+\\w+){0,8}\\s+\\b(?:otp|passcode|passcodes?|pin|password|cvv|cvc|ssn|card\\s+number|security\\s+code)\\b)"
+      - "(?:\\b(?:what\\s+is\\s+your|need\\s+your|require\\s+your|confirm\\s+your|verify\\s+your)\\b(?:\\s+\\w+){0,4}\\s+\\b(?:otp|pin|password|passcode|cvv|cvc|ssn)\\b)"
+      - "(?:\\bread\\s+back\\s+the\\s+code\\b)"
 
   impersonation:
     name: "Entity Impersonation"
     weight: 1.6
     patterns:
-      - "(?:internal revenue service|irs|federal trade commission|ftc|social security administration)"
-      - "(?:microsoft support|apple support|amazon fraud department|google security team)"
-      - "(?:bank of america|wells fargo|chase bank|fraud prevention department|fraud detection team)"
-      - "(?:officer|detective|investigator|special agent)"
+      - "(?:\\b(?:internal revenue service|irs|federal trade commission|ftc|social security administration|treasury department|justice|police department|fbi|customs agency|windows defender|apple technical|microsoft (?:support|customer)|chase security|target fraud|wells fargo)\\b)"
+      - "(?:\\b(?:officer|special agent|investigator|security officer)\\b)"
 
   financial_demand:
-    name: "Unusual Payment and Fund Transfer"
-    weight: 2.0
+    name: "Unusual Payment Demands"
+    weight: 2.2
     patterns:
-      - "(?:gift card|apple gift card|target gift card|google play card|steam card)"
-      - "(?:bitcoin|crypto|cryptocurrency|bitcoin atm|coinbase|ethereum)"
-      - "(?:wire transfer|western union|moneygram|zelle|cash app|venmo)"
-      - "(?:safe account|safekeeping account|government safe account|offshore)"
+      - "(?:\\b(?:buy|pay|send|purchase|load)\\b(?:\\s+\\w+){0,6}\\s+\\b(?:gift\\s+cards?|apple\\s+gift|target\\s+gift|google\\s+play|steam\\s+card)\\b)"
+      - "(?:\\b(?:transfer|deposit|send|pay|wire)\\b(?:\\s+\\w+){0,6}\\s+\\b(?:bitcoin|crypto|cryptocurrency|bitcoin\\s+atm|western\\s+union|wire\\s+transfer)\\b)"
+      - "(?:\\b(?:safe\\s+account|custody\\s+account|safekeeping\\s+account|government\\s+safe\\s+account)\\b)"
 
   remote_access:
     name: "Remote Computer Access"
-    weight: 2.0
+    weight: 2.5
     patterns:
-      - "(?:anydesk|teamviewer|ultraviewer|quick assist|screen share|logmein)"
-      - "(?:download software|install the application|allow remote access|grant control)"
-      - "(?:connect to your (?:computer|phone|device|desktop))"
+      - "(?:\\b(?:download|install|grant|give|allow)\\b(?:\\s+\\w+){0,6}\\s+\\b(?:anydesk|teamviewer|ultraviewer|remote\\s+access|remote\\s+control)\\b)"
 
   secrecy_isolation:
     name: "Secrecy and Isolation Tactics"
     weight: 1.8
     patterns:
-      - "(?:don'?t tell (?:anyone|your bank|your family|your spouse))"
+      - "(?:don'?t tell (?:anyone|your bank|your family))"
       - "(?:keep this confidential|stay on the line|do not hang up)"
-      - "(?:if the bank teller asks|tell them it'?s for home renovation|tell them it'?s for family)"
-      - "(?:federal gag order|classified investigation)"
+      - "(?:do not inform your family or bank teller)"

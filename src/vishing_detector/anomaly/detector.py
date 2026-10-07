@@ -157,6 +157,51 @@ class AcousticAnomalyDetector:
 
         return self
 
+    def calibrate_threshold_on_validation(
+        self,
+        X_val_benign: Union[np.ndarray, pd.DataFrame],
+        X_val_scam: Optional[Union[np.ndarray, pd.DataFrame]] = None,
+        target_benign_percentile: float = 85.0,
+    ) -> float:
+        """Calibrate anomaly decision threshold on a held-out validation set.
+
+        If both benign and scam validation features are provided, chooses threshold
+        optimizing F1 score on validation. Otherwise, sets threshold at target percentile
+        of normal validation speech.
+        """
+        if not self._is_fitted:
+            raise RuntimeError("Model must be fitted before calibration.")
+
+        scores_benign = self.score_anomaly(X_val_benign)
+
+        if X_val_scam is not None and len(X_val_scam) > 0:
+            scores_scam = self.score_anomaly(X_val_scam)
+            y_true = np.concatenate([np.zeros(len(scores_benign)), np.ones(len(scores_scam))])
+            all_scores = np.concatenate([scores_benign, scores_scam])
+
+            best_f1 = -1.0
+            best_th = 0.5
+            candidate_thresholds = np.linspace(np.min(all_scores), np.max(all_scores), 100)
+            for th in candidate_thresholds:
+                y_pred = (all_scores >= th).astype(int)
+                tp = np.sum((y_pred == 1) & (y_true == 1))
+                fp = np.sum((y_pred == 1) & (y_true == 0))
+                fn = np.sum((y_pred == 0) & (y_true == 1))
+                precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+                recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+                f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
+                if f1 > best_f1:
+                    best_f1 = f1
+                    best_th = float(th)
+
+            self.calibrated_threshold = best_th
+            logger.info("Calibrated anomaly threshold on validation to %.4f (Val F1: %.4f)", best_th, best_f1)
+        else:
+            self.calibrated_threshold = float(np.percentile(scores_benign, target_benign_percentile))
+            logger.info("Calibrated anomaly threshold on validation benign %.1fth percentile: %.4f", target_benign_percentile, self.calibrated_threshold)
+
+        return self.calibrated_threshold
+
     def score_anomaly(self, X: Union[np.ndarray, pd.DataFrame]) -> np.ndarray:
         """Compute continuous normalized anomaly scores in [0.0, 1.0], where 1 is highly anomalous.
 

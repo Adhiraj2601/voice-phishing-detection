@@ -229,7 +229,7 @@ def run_full_evaluation(
     print("\n" + "=" * 80)
     print("COMPONENT ABLATION STUDY RESULTS (Held-Out Telephony Test Set, N = 220)")
     print("=" * 80)
-    header = "| Model Variant | Precision | Recall | F1 Score | ROC-AUC | Hard-Neg FPR | Mean Latency |"
+    header = "| Model Variant | Precision | Recall | F1 Score | ROC-AUC | Hard-Neg FPR (N=49) | Mean Latency |"
     sep = "| :--- | :---: | :---: | :---: | :---: | :---: | :---: |"
     print(header)
     print(sep)
@@ -237,7 +237,7 @@ def run_full_evaluation(
     for r, name in [
         (res_acoustic, "Acoustic-Only (Acoustic Anomaly)"),
         (res_text, "Text-Only (Scam Lexicon Rules)"),
-        (res_fused, "**Fused Multi-Modal (Our Method)**"),
+        (res_fused, "**Fused Multi-Modal**"),
     ]:
         row = (
             f"| {name} | {r['precision']:.4f} | {r['recall']:.4f} | {r['f1']:.4f} | "
