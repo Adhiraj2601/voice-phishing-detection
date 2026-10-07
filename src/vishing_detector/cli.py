@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 import logging
-import os
-import sys
 import time
 from pathlib import Path
 from typing import Optional
 
 import numpy as np
 import typer
-from rich import print as rprint
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -80,7 +77,7 @@ def detect(
     # Key Reasons
     console.print("\n[bold yellow]Forensic Indicators:[/]")
     for r in expl.primary_reasons:
-        console.print(f"  • {r}")
+        console.print(f"  - {r}")
 
     # Top Triggered Cues Table
     if expl.top_triggered_cues:

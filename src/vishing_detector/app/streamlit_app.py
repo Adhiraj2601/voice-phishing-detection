@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import os
 import tempfile
 from pathlib import Path
-from typing import Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -99,7 +97,7 @@ def plot_waveform_and_spectrogram(audio_path: Path):
     ax2.set_facecolor("#161b22")
     s_mel = librosa.feature.melspectrogram(y=y, sr=sr, n_mels=64)
     s_db = librosa.power_to_db(s_mel, ref=np.max)
-    img = librosa.display.specshow(s_db, sr=sr, x_axis="time", y_axis="mel", ax=ax2, cmap="magma")
+    librosa.display.specshow(s_db, sr=sr, x_axis="time", y_axis="mel", ax=ax2, cmap="magma")
     ax2.set_ylabel("Frequency (Hz)", color="white")
     ax2.set_xlabel("Time (seconds)", color="white")
     ax2.tick_params(colors="white")
@@ -235,7 +233,7 @@ if audio_path and audio_path.exists():
                 <div style="background-color: {color}22; border: 2px solid {color}; border-radius: 8px; padding: 18px; margin-bottom: 20px;">
                     <h3 style="color: {color}; margin: 0 0 8px 0;">{alert_title}</h3>
                     <p style="font-size: 1.1em; margin: 0; color: white;">
-                        Overall Threat Index: <strong>{expl.overall_risk_score:.1f} / 100</strong> &nbsp;|&nbsp; 
+                        Overall Threat Index: <strong>{expl.overall_risk_score:.1f} / 100</strong> &nbsp;|&nbsp;
                         Threat Tier: <strong>{expl.risk_level}</strong> &nbsp;|&nbsp;
                         First Alert Latency: <strong>{f'{expl.first_alert_time:.1f}s' if expl.first_alert_time is not None else 'N/A'}</strong>
                     </p>

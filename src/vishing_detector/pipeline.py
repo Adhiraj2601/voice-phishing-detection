@@ -12,7 +12,7 @@ import yaml
 
 from vishing_detector.anomaly.detector import AcousticAnomalyDetector
 from vishing_detector.asr.transcriber import Transcriber, get_transcriber
-from vishing_detector.audio.loader import AudioChunk, AudioLoader
+from vishing_detector.audio.loader import AudioLoader
 from vishing_detector.features.acoustic import AcousticFeatureExtractor
 from vishing_detector.fusion.scorer import (
     CallExplanation,

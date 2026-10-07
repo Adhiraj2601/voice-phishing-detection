@@ -7,9 +7,15 @@ import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Generator, List, Optional, Tuple, Union
+from typing import Generator, List, Tuple, Union
 
-# Auto-detect ffmpeg in common Windows WinGet / user locations before pydub initializes
+import numpy as np
+from pydub import AudioSegment, silence
+
+logger = logging.getLogger(__name__)
+
+
+# Auto-detect ffmpeg in common Windows WinGet / user locations
 def _configure_ffmpeg_path() -> None:
     if shutil.which("ffmpeg") is not None:
         return
@@ -18,14 +24,10 @@ def _configure_ffmpeg_path() -> None:
         for ffmpeg_candidate in winget_packages.glob("**/ffmpeg.exe"):
             ffmpeg_dir = str(ffmpeg_candidate.parent)
             os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
+            AudioSegment.converter = str(ffmpeg_candidate)
             return
 
 _configure_ffmpeg_path()
-
-import numpy as np
-from pydub import AudioSegment, silence
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass

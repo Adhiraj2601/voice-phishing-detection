@@ -4,14 +4,11 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-import wave
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional, Union
 
-import numpy as np
 from pydub import AudioSegment
 
 from vishing_detector.audio.loader import AudioChunk
@@ -85,7 +82,7 @@ class MockTranscriber(Transcriber):
         self.predefined_script = predefined_script
 
     def transcribe_chunk(self, chunk: AudioChunk) -> TranscriptionResult:
-        text = self.predefined_script or "hello this is verification security officer speaking"
+        text = self.predefined_script or "hello how are you doing today"
         seg = TranscriptionSegment(
             text=text,
             start_time=chunk.start_time,
@@ -96,7 +93,7 @@ class MockTranscriber(Transcriber):
 
     def transcribe_audio_segment(self, segment: AudioSegment) -> TranscriptionResult:
         duration = len(segment) / 1000.0
-        text = self.predefined_script or "hello this is verification security officer speaking"
+        text = self.predefined_script or "hello how are you doing today"
         seg = TranscriptionSegment(text=text, start_time=0.0, end_time=duration, confidence=0.95)
         return TranscriptionResult(full_text=text, segments=[seg], duration=duration)
 

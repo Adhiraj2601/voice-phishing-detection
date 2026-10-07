@@ -14,14 +14,12 @@ import os
 import platform
 import random
 import subprocess
-import tempfile
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List
 
 import librosa
 import numpy as np
 import soundfile as sf
-from pydub import AudioSegment, effects
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)

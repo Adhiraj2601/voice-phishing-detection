@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Tuple, Union
 
 import librosa
 import numpy as np
@@ -40,7 +40,7 @@ class AcousticFeatures:
             "start_time": self.start_time,
             "end_time": self.end_time,
         }
-        for name, val in zip(self.feature_names, self.vector):
+        for name, val in zip(self.feature_names, self.vector, strict=False):
             data[name] = float(val)
         return data
 
