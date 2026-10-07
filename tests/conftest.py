@@ -9,7 +9,6 @@ from typing import Generator
 import numpy as np
 import pytest
 import soundfile as sf
-from pydub import AudioSegment
 
 
 @pytest.fixture

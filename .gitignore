@@ -67,6 +67,7 @@ data/synthetic/
 !data/samples/sample_benign.wav
 !data/samples/sample_scam.wav
 models/*.joblib
+models/vosk*
 !models/.gitkeep
 
 # Environment variables

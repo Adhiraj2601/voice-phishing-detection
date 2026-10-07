@@ -4,7 +4,6 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from vishing_detector.audio.loader import AudioLoader
 from vishing_detector.features.acoustic import AcousticFeatureExtractor, AcousticFeatures

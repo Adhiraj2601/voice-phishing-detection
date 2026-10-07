@@ -53,6 +53,7 @@ filterwarnings = [
 [tool.ruff]
 line-length = 120
 target-version = "py310"
+exclude = ["notebooks", ".venv"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B"]

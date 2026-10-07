@@ -7,7 +7,6 @@ from pydub import AudioSegment
 from vishing_detector.asr.transcriber import (
     MockTranscriber,
     TranscriptionResult,
-    TranscriptionSegment,
     get_transcriber,
 )
 from vishing_detector.audio.loader import AudioLoader
