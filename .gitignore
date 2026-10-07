@@ -1,0 +1,78 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints
+*/.ipynb_checkpoints/*
+
+# IDEs and editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Testing and coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+.coverage.*
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+
+# Audio data & large models (do not commit raw datasets or heavy weights)
+data/raw/
+data/processed/
+data/synthetic/
+*.mp3
+*.wav
+*.m4a
+*.ogg
+*.flac
+!tests/fixtures/*.wav
+!data/samples/sample_benign.wav
+!data/samples/sample_scam.wav
+models/*.joblib
+!models/.gitkeep
+
+# Environment variables
+.env
+.env.local
+
+# Operating System Files
+.DS_Store
+Thumbs.db

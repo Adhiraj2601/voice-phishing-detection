@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vishing-detector"
+version = "0.1.0"
+description = "AI-powered voice phishing (vishing) detection using speech recognition, acoustic anomaly detection, and multi-modal risk scoring."
+authors = [{ name = "Adhiraj" }]
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+dependencies = [
+    "pydub>=0.25.1",
+    "librosa>=0.10.1",
+    "soundfile>=0.12.1",
+    "scikit-learn>=1.4.0",
+    "numpy>=1.26.0,<2.1.0",
+    "pandas>=2.1.0",
+    "matplotlib>=3.8.0",
+    "seaborn>=0.13.0",
+    "pyyaml>=6.0.1",
+    "joblib>=1.3.2",
+    "rich>=13.7.0",
+    "typer>=0.9.0",
+    "vosk>=0.3.45",
+    "scipy>=1.11.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.3.0",
+    "black>=24.2.0",
+    "streamlit>=1.32.0",
+]
+
+[project.scripts]
+vishing-detector = "vishing_detector.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::UserWarning",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B"]
+ignore = ["B008"]

@@ -1,0 +1,51 @@
+# AI-Powered Voice Phishing Detection - Configuration
+
+audio:
+  target_sample_rate: 16000
+  target_channels: 1
+  normalize_db: -20.0
+  silence_thresh_db: -40.0
+  min_silence_len_ms: 500
+  window_duration_sec: 3.0
+  hop_duration_sec: 1.0
+
+features:
+  n_mfcc: 13
+  n_fft: 2048
+  hop_length: 512
+  fmin: 50
+  fmax: 8000
+  pitch_method: "yin"  # "yin" or "pyin"
+
+asr:
+  backend: "vosk"  # "vosk" or "mock" (for fast unit testing)
+  model_path: "models/vosk-model-small-en-us-0.15"
+  language: "en-us"
+
+anomaly:
+  model_type: "isolation_forest"  # "isolation_forest" or "one_class_svm"
+  contamination: 0.05
+  random_state: 42
+  model_save_path: "models/acoustic_anomaly_model.joblib"
+  scaler_save_path: "models/acoustic_scaler.joblib"
+  threshold_percentile: 90.0
+
+nlp:
+  lexicon_path: "config/scam_lexicon.yaml"
+  classifier_model_path: "models/scam_text_classifier.joblib"
+  urgency_weight: 1.2
+  credential_weight: 2.0
+  financial_weight: 1.8
+  impersonation_weight: 1.5
+  remote_access_weight: 1.8
+  secrecy_weight: 1.4
+
+fusion:
+  weights:
+    acoustic_anomaly: 0.35
+    text_cues: 0.65
+  alert_thresholds:
+    low: 25.0
+    elevated: 50.0
+    critical: 75.0
+  smoothing_alpha: 0.4  # Exponential moving average factor for stream risk scores
