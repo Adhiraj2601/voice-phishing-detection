@@ -58,3 +58,23 @@ def test_one_class_svm_training():
     scores = detector.score_anomaly(X_train[:5])
     assert len(scores) == 5
     assert (scores >= 0.0).all() and (scores <= 1.0).all()
+
+
+def test_calibrate_threshold_on_validation():
+    feature_names = [f"feat_{i}" for i in range(10)]
+    X_train = np.random.normal(loc=0.0, scale=1.0, size=(60, 10))
+
+    detector = AcousticAnomalyDetector(
+        model_type="isolation_forest",
+        feature_names=feature_names,
+        random_state=42,
+    )
+    detector.fit(X_train, calibrate_threshold=False)
+
+    # Validation benign and scam
+    X_val_benign = np.random.normal(loc=0.0, scale=1.0, size=(30, 10))
+    X_val_scam = np.random.normal(loc=2.5, scale=1.5, size=(30, 10))
+
+    th = detector.calibrate_threshold_on_validation(X_val_benign, X_val_scam)
+    assert 0.0 < th < 1.0
+    assert detector.calibrated_threshold == th
