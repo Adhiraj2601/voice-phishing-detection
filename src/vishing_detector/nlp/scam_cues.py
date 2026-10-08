@@ -1,4 +1,4 @@
-"""Rule-based and machine-learning scam cue text analysis module."""
+"""Rule-based and machine-learning scam cue text analysis module with intent-awareness."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class CueMatch:
-    """Individual matched scam cue within analyzed text.
+    """Individual matched scam cue within analyzed text with explainability attributes.
 
     Attributes:
         category: Lexicon category identifier (e.g., 'credential_harvesting').
@@ -28,6 +28,9 @@ class CueMatch:
         weight: Assigned category severity weight.
         start_char: Character start position in analyzed text.
         end_char: Character end position in analyzed text.
+        intent_type: Classified intent ('demand', 'directive', 'threat', 'neutral_mention').
+        is_dampened: Whether score was reduced due to benign context / inquiry.
+        adjustment_reason: Forensic explanation of score weighting.
     """
 
     category: str
@@ -37,6 +40,9 @@ class CueMatch:
     weight: float
     start_char: int
     end_char: int
+    intent_type: str = "demand"
+    is_dampened: bool = False
+    adjustment_reason: str = "full_weight_demand_matched"
 
 
 @dataclass
@@ -47,26 +53,31 @@ class ScamAnalysisResult:
         text: Input transcript text analyzed.
         cue_matches: List of detected CueMatch objects.
         category_scores: Dict mapping category to raw triggered score.
+        category_counts: Dict mapping category to count of triggered cues.
         rule_score: Normalized rule-based threat score in [0.0, 1.0].
         ml_score: Probability score from secondary TF-IDF classifier (if available).
         combined_text_score: Final fused textual threat score in [0.0, 1.0].
         summary_tags: Top alert labels for quick dashboard or CLI inspection.
+        inquiry_detected: Whether benign inquiry or reporting context was detected.
+        intent_aware: Whether intent-aware rules were applied during scoring.
     """
 
     text: str
     cue_matches: List[CueMatch] = field(default_factory=list)
     category_scores: Dict[str, float] = field(default_factory=dict)
+    category_counts: Dict[str, int] = field(default_factory=dict)
     rule_score: float = 0.0
     ml_score: Optional[float] = None
     combined_text_score: float = 0.0
     summary_tags: List[str] = field(default_factory=list)
     inquiry_detected: bool = False
+    intent_aware: bool = True
 
     @property
     def has_critical_indicators(self) -> bool:
-        """Indicates if high-risk categories (credentials or financial) were triggered."""
+        """Indicates if high-risk categories (credentials, payment, or remote access) were triggered."""
         critical_cats = {"credential_harvesting", "financial_demand", "remote_access"}
-        return any(m.category in critical_cats for m in self.cue_matches)
+        return any(m.category in critical_cats and not m.is_dampened for m in self.cue_matches)
 
 
 class ScamCueAnalyzer:
@@ -74,27 +85,29 @@ class ScamCueAnalyzer:
 
     DEFAULT_INQUIRY_PATTERNS = [
         r"\b(?:is that normal|is it normal|is this normal)\b",
-        r"\b(?:did (?:you|our bank|someone) (?:send|initiate|call|email|text))\b",
-        r"\b(?:should i (?:change|reset|pay|give|confirm|worry))\b",
+        r"\b(?:did (?:you|someone|our bank|the bank) (?:send|initiate|call|email|text|try))\b",
+        r"\b(?:should i (?:change|reset|pay|give|confirm|worry|share))\b",
         r"\b(?:can you (?:help|verify|show me|explain|check))\b",
-        r"\b(?:could you (?:verify|check|help|tell me))\b",
-        r"\b(?:why (?:was|did) (?:my|our))\b",
+        r"\b(?:could you (?:verify|check|help|tell me|clarify))\b",
+        r"\b(?:why (?:was|did|does) (?:my|the|our))\b",
         r"\b(?:asking (?:why|for|if)|inquire about|wondering if)\b",
-        r"\b(?:i (?:just )?(?:received|got|saw) (?:an? )?(?:sms|text|letter|call|voicemail|notification|charge))\b",
-        r"\b(?:reporting a suspicious|suspicious voicemail|unfamiliar vendor)\b",
-        r"\b(?:claim(?:ing|ed) to be|fraudulent scam)\b",
-        r"\b(?:told them no|hung up)\b",
-        r"\b(?:dispute the (?:charge|transaction))\b",
-        r"\b(?:want to verify|help me verify)\b",
-        r"\b(?:calling .* support to ask why)\b",
-        r"\b(?:trying to reset my)\b",
+        r"\b(?:i (?:just )?(?:received|got|saw|noticed) (?:an? )?(?:sms|text|letter|call|voicemail|notification|charge|message|email))\b",
+        r"\b(?:reporting (?:a|an) (?:suspicious|unsolicited)|unfamiliar (?:vendor|transaction|charge))\b",
+        r"\b(?:claim(?:ing|ed) to be|pretended to|fraudulent (?:scam|callers?))\b",
+        r"\b(?:told them (?:no|never)|hung up|hung up immediately)\b",
+        r"\b(?:dispute the (?:charge|transaction)|verify if it is)\b",
+        r"\b(?:never (?:to )?share|advised (?:customers|me) to)\b",
+        r"\b(?:delivery (?:driver|courier) (?:is )?(?:asking|needs|requesting))\b",
+        r"\b(?:calling .* (?:support|company) to (?:ask|report))\b",
+        r"\b(?:trying to reset my|not sure if)\b",
+        r"\b(?:is there a reason|accidentally triggered)\b",
     ]
 
     def __init__(
         self,
         lexicon_path: Optional[Union[str, Path]] = None,
         custom_weights: Optional[Dict[str, float]] = None,
-        inquiry_dampener: float = 0.20,
+        inquiry_dampener: float = 0.15,
     ) -> None:
         """Initialize the scam cue analyzer.
 
@@ -105,7 +118,9 @@ class ScamCueAnalyzer:
         """
         self.lexicon_path = Path(lexicon_path) if lexicon_path else None
         self.categories: Dict[str, Dict[str, Any]] = {}
+        self.legacy_categories: Dict[str, List[str]] = {}
         self._compiled_patterns: Dict[str, List[Tuple[re.Pattern, str]]] = {}
+        self._compiled_legacy_patterns: Dict[str, List[Tuple[re.Pattern, str]]] = {}
         self._compiled_inquiry_patterns: List[re.Pattern] = []
         self.custom_weights = custom_weights or {}
         self.inquiry_dampener = inquiry_dampener
@@ -131,13 +146,16 @@ class ScamCueAnalyzer:
             data = self._get_fallback_lexicon()
 
         self.categories = data["categories"]
+        self.legacy_categories = data.get("legacy_categories", {})
+
         self._compiled_patterns.clear()
+        self._compiled_legacy_patterns.clear()
         self._compiled_inquiry_patterns = [
             re.compile(pat, re.IGNORECASE) for pat in self.DEFAULT_INQUIRY_PATTERNS
         ]
 
+        # Compile intent-aware patterns
         for cat_id, cat_info in self.categories.items():
-            # Apply weight override if provided
             if cat_id in self.custom_weights:
                 cat_info["weight"] = self.custom_weights[cat_id]
 
@@ -151,6 +169,17 @@ class ScamCueAnalyzer:
                     logger.error("Invalid regex in lexicon [%s]: %s (%s)", cat_id, pat_str, err)
 
             self._compiled_patterns[cat_id] = compiled_list
+
+        # Compile legacy baseline patterns (unconstrained keyword matching)
+        for cat_id, patterns in self.legacy_categories.items():
+            compiled_list = []
+            for pat_str in patterns:
+                try:
+                    compiled = re.compile(pat_str, re.IGNORECASE)
+                    compiled_list.append((compiled, pat_str))
+                except re.error as err:
+                    logger.error("Invalid regex in legacy lexicon [%s]: %s (%s)", cat_id, pat_str, err)
+            self._compiled_legacy_patterns[cat_id] = compiled_list
 
     @staticmethod
     def _get_fallback_lexicon() -> Dict[str, Any]:
@@ -171,33 +200,33 @@ class ScamCueAnalyzer:
                     "name": "Credential and Authentication Demands",
                     "weight": 2.8,
                     "patterns": [
-                        r"(?:\b(?:read\s+(?:back|out|me)?|give\s+(?:me|us)?|tell\s+(?:me|us)?|provide|disclose|share\s+(?:with\s+me)?|send\s+(?:me|us)?|enter)\b(?:\s+\w+){0,8}\s+\b(?:otp|passcode|passcodes?|pin|password|cvv|cvc|ssn|card\s+number|security\s+code)\b)",
-                        r"(?:\b(?:what\s+is\s+your|need\s+your|require\s+your|confirm\s+your|verify\s+your)\b(?:\s+\w+){0,4}\s+\b(?:otp|pin|password|passcode|cvv|cvc|ssn)\b)",
-                        r"(?:\bread\s+back\s+the\s+code\b)",
+                        r"(?:\b(?:read\s+(?:back|out|me)?|give\s+(?:me|us)?|tell\s+(?:me|us)?|provide(?:\s+your)?|disclose(?:\s+your)?|share\s+(?:with\s+me)?|send\s+(?:me|us)?|enter(?:\s+your)?|state\s+(?:your)?|hand\s+over)\b(?:\s+\w+){0,8}\s+\b(?:otp|passcode|passcodes?|pin|password|cvv|cvc|ssn|card\s+number|security\s+code|security\s+digits?|verification\s+code|access\s+digits?)\b)",
+                        r"(?:\b(?:what\s+is\s+your|need\s+your|require\s+your|confirm\s+your|verify\s+your)\b(?:\s+\w+){0,4}\s+\b(?:otp|pin|password|passcode|cvv|cvc|ssn|verification\s+code)\b)",
+                        r"(?:\bread\s+back\s+the\s+(?:six\s+digit\s+)?code\b)",
                     ],
                 },
                 "impersonation": {
                     "name": "Entity Impersonation",
                     "weight": 1.6,
                     "patterns": [
-                        r"(?:\b(?:internal revenue service|irs|federal trade commission|ftc|social security administration|treasury department|justice|police department|fbi|customs agency|windows defender|apple technical|microsoft (?:support|customer)|chase security|target fraud|wells fargo)\b)",
-                        r"(?:\b(?:officer|special agent|investigator|security officer)\b)",
+                        r"(?:\b(?:internal revenue service|irs|federal trade commission|ftc|social security administration|treasury department|justice|police department|fbi|customs agency|windows defender|apple technical|microsoft (?:support|customer)|chase security|target fraud|wells fargo|citibank|paypal anti-fraud|homeland security|bank of america)\b)",
+                        r"(?:\b(?:officer|special agent|investigator|security officer|fraud department|mitigation unit)\b)",
                     ],
                 },
                 "financial_demand": {
                     "name": "Unusual Payment Demands",
                     "weight": 2.2,
                     "patterns": [
-                        r"(?:\b(?:buy|pay|send|purchase|load)\b(?:\s+\w+){0,6}\s+\b(?:gift\s+cards?|apple\s+gift|target\s+gift|google\s+play|steam\s+card)\b)",
-                        r"(?:\b(?:transfer|deposit|send|pay|wire)\b(?:\s+\w+){0,6}\s+\b(?:bitcoin|crypto|cryptocurrency|bitcoin\s+atm|western\s+union|wire\s+transfer)\b)",
-                        r"(?:\b(?:safe\s+account|custody\s+account|safekeeping\s+account|government\s+safe\s+account)\b)",
+                        r"(?:\b(?:buy|pay|send|purchase|load|settle)\b(?:\s+\w+){0,6}\s+\b(?:gift\s+cards?|apple\s+gift|target\s+gift|google\s+play|steam\s+card|digital\s+vouchers?|prepaid\s+cards?)\b)",
+                        r"(?:\b(?:transfer|deposit|send|pay|wire|liquidate)\b(?:\s+\w+){0,6}\s+\b(?:bitcoin|crypto|cryptocurrency|bitcoin\s+atm|western\s+union|wire\s+transfer|moneygram|crypto\s+kiosk|bitcoin\s+machine)\b)",
+                        r"(?:\b(?:safe\s+account|custody\s+account|safekeeping\s+account|government\s+safe\s+account|escrow\s+depository)\b)",
                     ],
                 },
                 "remote_access": {
                     "name": "Remote Computer Access",
                     "weight": 2.5,
                     "patterns": [
-                        r"(?:\b(?:download|install|grant|give|allow)\b(?:\s+\w+){0,6}\s+\b(?:anydesk|teamviewer|ultraviewer|remote\s+access|remote\s+control)\b)",
+                        r"(?:\b(?:download|install|grant|give|allow)\b(?:\s+\w+){0,6}\s+\b(?:anydesk|teamviewer|ultraviewer|quicksupport|remote\s+access|remote\s+control|desktop\s+screen)\b)",
                     ],
                 },
                 "secrecy_isolation": {
@@ -205,38 +234,63 @@ class ScamCueAnalyzer:
                     "weight": 1.8,
                     "patterns": [
                         r"(?:don'?t tell (?:anyone|your bank|your family))",
-                        r"(?:keep this confidential|stay on the line|do not hang up)",
-                        r"(?:do not inform your family or bank teller)",
+                        r"(?:keep this (?:call )?confidential|stay on the line|do not hang up|strictly private)",
+                        r"(?:do not inform your family or bank teller|do not discuss this call)",
                     ],
                 },
             }
         }
 
-    def analyze_text(self, text: str) -> ScamAnalysisResult:
+    def analyze_text(
+        self,
+        text: str,
+        intent_aware: bool = True,
+    ) -> ScamAnalysisResult:
         """Analyze a transcript text block for scam cues and calculate threat scores.
 
         Args:
             text: Input transcript string.
+            intent_aware: If True, uses proximity demand patterns and inquiry dampening.
+                          If False, uses unconstrained bare keywords for baseline ablation.
 
         Returns:
             ScamAnalysisResult containing detected matches and normalized scores.
         """
         if not text or not text.strip():
-            return ScamAnalysisResult(text=text or "")
+            return ScamAnalysisResult(text=text or "", intent_aware=intent_aware)
 
         cleaned_text = text.strip()
         matches: List[CueMatch] = []
         category_scores: Dict[str, float] = {cat: 0.0 for cat in self.categories}
+        category_counts: Dict[str, int] = {cat: 0 for cat in self.categories}
+
+        # Check for benign inquiry or reporting context
+        is_inquiry = False
+        if intent_aware:
+            is_inquiry = any(p.search(cleaned_text) for p in self._compiled_inquiry_patterns)
+
+        patterns_dict = self._compiled_patterns if intent_aware else (
+            self._compiled_legacy_patterns if self._compiled_legacy_patterns else self._compiled_patterns
+        )
 
         for cat_id, cat_info in self.categories.items():
             cat_name = cat_info.get("name", cat_id)
-            weight = float(cat_info.get("weight", 1.0))
-            compiled_list = self._compiled_patterns.get(cat_id, [])
+            base_weight = float(cat_info.get("weight", 1.0))
+            compiled_list = patterns_dict.get(cat_id, [])
 
             for pattern_obj, raw_pattern in compiled_list:
                 for match in pattern_obj.finditer(cleaned_text):
                     start, end = match.span()
                     matched_substr = match.group(0)
+
+                    weight = base_weight
+                    is_dampened = False
+                    reason = "full_weight_demand_matched" if intent_aware else "legacy_keyword_matched"
+
+                    if intent_aware and is_inquiry:
+                        weight *= self.inquiry_dampener
+                        is_dampened = True
+                        reason = "inquiry_or_reporting_context_dampened"
 
                     cue_match = CueMatch(
                         category=cat_id,
@@ -246,17 +300,15 @@ class ScamCueAnalyzer:
                         weight=weight,
                         start_char=start,
                         end_char=end,
+                        intent_type="demand" if not is_dampened else "informational_mention",
+                        is_dampened=is_dampened,
+                        adjustment_reason=reason,
                     )
                     matches.append(cue_match)
                     category_scores[cat_id] += weight
+                    category_counts[cat_id] += 1
 
-        # Check for benign inquiry or reporting context
-        is_inquiry = any(p.search(cleaned_text) for p in self._compiled_inquiry_patterns)
-
-        # Compute raw weighted score with non-linear saturation curve
         total_raw_score = sum(category_scores.values())
-        if is_inquiry:
-            total_raw_score *= self.inquiry_dampener
 
         # Saturation formula: score = 1.0 - exp(-raw / 3.0), mapping [0, inf) -> [0.0, 1.0]
         rule_score = float(1.0 - np.exp(-total_raw_score / 3.0)) if total_raw_score > 0 else 0.0
@@ -271,7 +323,7 @@ class ScamCueAnalyzer:
             except Exception as err:
                 logger.warning("ML text scoring error: %s", err)
 
-        # Fused textual score: combine rule and ML (favoring rules for transparent recall)
+        # Fused textual score
         if ml_score is not None:
             combined_score = 0.65 * rule_score + 0.35 * ml_score
         else:
@@ -287,11 +339,13 @@ class ScamCueAnalyzer:
             text=cleaned_text,
             cue_matches=matches,
             category_scores=category_scores,
+            category_counts=category_counts,
             rule_score=rule_score,
             ml_score=ml_score,
             combined_text_score=float(np.clip(combined_score, 0.0, 1.0)),
             summary_tags=tags,
             inquiry_detected=is_inquiry,
+            intent_aware=intent_aware,
         )
 
     def train_ml_classifier(
@@ -299,12 +353,7 @@ class ScamCueAnalyzer:
         texts: List[str],
         labels: List[int],
     ) -> None:
-        """Train optional TF-IDF + Logistic Regression secondary text classifier.
-
-        Args:
-            texts: List of training transcript texts.
-            labels: List of binary labels (0 for benign, 1 for vishing).
-        """
+        """Train optional TF-IDF + Logistic Regression secondary text classifier."""
         logger.info("Training secondary TF-IDF text classifier on %d samples", len(texts))
         self.tfidf_vectorizer = TfidfVectorizer(
             ngram_range=(1, 2),

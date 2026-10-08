@@ -1,10 +1,10 @@
 # Voice Phishing (Vishing) Indicator Lexicon
 # Categorized with associated risk weights and intent-aware regex patterns
-# Intent-Aware Design:
+# Intent-Aware Architecture:
 # - Credential extraction requires imperative demand phrasing (e.g., 'read back', 'give me', 'tell me your')
 # - Payment demands require transactional directive verbs (e.g., 'buy', 'pay', 'transfer', 'send')
 # - Authority impersonation detects organizational claiming phrases
-# - Benign inquiries (e.g., questions about codes received) are handled via inquiry suppression in the analyzer.
+# - Benign inquiries (e.g., questions about codes received) are suppressed via benign context patterns.
 
 categories:
   urgency_threat:
@@ -20,35 +20,51 @@ categories:
     name: "Credential and Authentication Demands"
     weight: 2.8
     patterns:
-      - "(?:\\b(?:read\\s+(?:back|out|me)?|give\\s+(?:me|us)?|tell\\s+(?:me|us)?|provide|disclose|share\\s+(?:with\\s+me)?|send\\s+(?:me|us)?|enter)\\b(?:\\s+\\w+){0,8}\\s+\\b(?:otp|passcode|passcodes?|pin|password|cvv|cvc|ssn|card\\s+number|security\\s+code)\\b)"
-      - "(?:\\b(?:what\\s+is\\s+your|need\\s+your|require\\s+your|confirm\\s+your|verify\\s+your)\\b(?:\\s+\\w+){0,4}\\s+\\b(?:otp|pin|password|passcode|cvv|cvc|ssn)\\b)"
-      - "(?:\\bread\\s+back\\s+the\\s+code\\b)"
+      # Proximity demand patterns: demand verb within 0-8 tokens of credential term
+      - "(?:\\b(?:read\\s+(?:back|out|me)?|give\\s+(?:me|us)?|tell\\s+(?:me|us)?|provide(?:\\s+your)?|disclose(?:\\s+your)?|share\\s+(?:with\\s+me)?|send\\s+(?:me|us)?|enter(?:\\s+your)?|state\\s+(?:your)?|hand\\s+over)\\b(?:\\s+\\w+){0,8}\\s+\\b(?:otp|passcode|passcodes?|pin|password|cvv|cvc|ssn|card\\s+number|security\\s+code|security\\s+digits?|verification\\s+code|access\\s+digits?)\\b)"
+      - "(?:\\b(?:what\\s+is\\s+your|need\\s+your|require\\s+your|confirm\\s+your|verify\\s+your)\\b(?:\\s+\\w+){0,4}\\s+\\b(?:otp|pin|password|passcode|cvv|cvc|ssn|verification\\s+code)\\b)"
+      - "(?:\\bread\\s+back\\s+the\\s+(?:six\\s+digit\\s+)?code\\b)"
 
   impersonation:
     name: "Entity Impersonation"
     weight: 1.6
     patterns:
-      - "(?:\\b(?:internal revenue service|irs|federal trade commission|ftc|social security administration|treasury department|justice|police department|fbi|customs agency|windows defender|apple technical|microsoft (?:support|customer)|chase security|target fraud|wells fargo)\\b)"
-      - "(?:\\b(?:officer|special agent|investigator|security officer)\\b)"
+      - "(?:\\b(?:internal revenue service|irs|federal trade commission|ftc|social security administration|treasury department|justice|police department|fbi|customs agency|windows defender|apple technical|microsoft (?:support|customer)|chase security|target fraud|wells fargo|citibank|paypal anti-fraud|homeland security|bank of america)\\b)"
+      - "(?:\\b(?:officer|special agent|investigator|security officer|fraud department|mitigation unit)\\b)"
 
   financial_demand:
     name: "Unusual Payment Demands"
     weight: 2.2
     patterns:
-      - "(?:\\b(?:buy|pay|send|purchase|load)\\b(?:\\s+\\w+){0,6}\\s+\\b(?:gift\\s+cards?|apple\\s+gift|target\\s+gift|google\\s+play|steam\\s+card)\\b)"
-      - "(?:\\b(?:transfer|deposit|send|pay|wire)\\b(?:\\s+\\w+){0,6}\\s+\\b(?:bitcoin|crypto|cryptocurrency|bitcoin\\s+atm|western\\s+union|wire\\s+transfer)\\b)"
-      - "(?:\\b(?:safe\\s+account|custody\\s+account|safekeeping\\s+account|government\\s+safe\\s+account)\\b)"
+      - "(?:\\b(?:buy|pay|send|purchase|load|settle)\\b(?:\\s+\\w+){0,6}\\s+\\b(?:gift\\s+cards?|apple\\s+gift|target\\s+gift|google\\s+play|steam\\s+card|digital\\s+vouchers?|prepaid\\s+cards?)\\b)"
+      - "(?:\\b(?:transfer|deposit|send|pay|wire|liquidate)\\b(?:\\s+\\w+){0,6}\\s+\\b(?:bitcoin|crypto|cryptocurrency|bitcoin\\s+atm|western\\s+union|wire\\s+transfer|moneygram|crypto\\s+kiosk|bitcoin\\s+machine)\\b)"
+      - "(?:\\b(?:safe\\s+account|custody\\s+account|safekeeping\\s+account|government\\s+safe\\s+account|escrow\\s+depository)\\b)"
 
   remote_access:
     name: "Remote Computer Access"
     weight: 2.5
     patterns:
-      - "(?:\\b(?:download|install|grant|give|allow)\\b(?:\\s+\\w+){0,6}\\s+\\b(?:anydesk|teamviewer|ultraviewer|remote\\s+access|remote\\s+control)\\b)"
+      - "(?:\\b(?:download|install|grant|give|allow)\\b(?:\\s+\\w+){0,6}\\s+\\b(?:anydesk|teamviewer|ultraviewer|quicksupport|remote\\s+access|remote\\s+control|desktop\\s+screen)\\b)"
 
   secrecy_isolation:
     name: "Secrecy and Isolation Tactics"
     weight: 1.8
     patterns:
       - "(?:don'?t tell (?:anyone|your bank|your family))"
-      - "(?:keep this confidential|stay on the line|do not hang up)"
-      - "(?:do not inform your family or bank teller)"
+      - "(?:keep this (?:call )?confidential|stay on the line|do not hang up|strictly private)"
+      - "(?:do not inform your family or bank teller|do not discuss this call)"
+
+# Legacy unconstrained patterns for baseline comparison (bare keywords without proximity demand)
+legacy_categories:
+  credential_harvesting:
+    - "\\b(?:otp|passcode|passcodes?|pin|password|cvv|cvc|ssn|card\\s+number|security\\s+code)\\b"
+  financial_demand:
+    - "\\b(?:gift\\s+cards?|bitcoin|crypto|wire\\s+transfer|western\\s+union)\\b"
+  urgency_threat:
+    - "\\b(?:urgent|immediately|arrest|warrant|compromised|warning)\\b"
+  impersonation:
+    - "\\b(?:bank|irs|support|police|agent|officer)\\b"
+  remote_access:
+    - "\\b(?:anydesk|teamviewer|remote\\s+access)\\b"
+  secrecy_isolation:
+    - "\\b(?:confidential|do not hang up|secret)\\b"
