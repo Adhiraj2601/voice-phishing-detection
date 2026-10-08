@@ -1,0 +1,372 @@
+{
+  "dataset_metadata": {
+    "total_test_samples": 300,
+    "benign_test_samples": 150,
+    "hard_negative_samples": 64,
+    "plain_benign_samples": 86,
+    "scam_test_samples": 150,
+    "distinct_heldout_voice_variants": 4
+  },
+  "variants": {
+    "acoustic_only": {
+      "variant": "acoustic_only",
+      "calibrated_threshold": 49.93,
+      "precision": 0.4921,
+      "recall": 0.2067,
+      "f1": 0.2911,
+      "accuracy": 0.4967,
+      "roc_auc": 0.5463,
+      "pr_auc": 0.535,
+      "fpr_hard_negatives": 0.3125,
+      "hard_neg_fp_count": 20,
+      "hard_neg_total": 64,
+      "fpr_plain_benign": 0.1395,
+      "plain_benign_fp_count": 12,
+      "plain_benign_total": 86,
+      "mean_latency_sec": 6.47,
+      "median_latency_sec": 7.0,
+      "bootstrap_ci": {
+        "f1_ci": [
+          0.2089,
+          0.3745
+        ],
+        "roc_auc_ci": [
+          0.4795,
+          0.6109
+        ],
+        "fpr_hard_ci": [
+          0.2034,
+          0.4238
+        ]
+      },
+      "confusion_matrix": [
+        [
+          118,
+          32
+        ],
+        [
+          119,
+          31
+        ]
+      ]
+    },
+    "text_only_legacy": {
+      "variant": "text_only_legacy",
+      "calibrated_threshold": 35.0,
+      "precision": 0.8602,
+      "recall": 0.5333,
+      "f1": 0.6584,
+      "accuracy": 0.7233,
+      "roc_auc": 0.7331,
+      "pr_auc": 0.7397,
+      "fpr_hard_negatives": 0.2031,
+      "hard_neg_fp_count": 13,
+      "hard_neg_total": 64,
+      "fpr_plain_benign": 0.0,
+      "plain_benign_fp_count": 0,
+      "plain_benign_total": 86,
+      "mean_latency_sec": 3.0,
+      "median_latency_sec": 3.0,
+      "bootstrap_ci": {
+        "f1_ci": [
+          0.5815,
+          0.7244
+        ],
+        "roc_auc_ci": [
+          0.6872,
+          0.779
+        ],
+        "fpr_hard_ci": [
+          0.1154,
+          0.3088
+        ]
+      },
+      "confusion_matrix": [
+        [
+          137,
+          13
+        ],
+        [
+          70,
+          80
+        ]
+      ]
+    },
+    "text_only_intent": {
+      "variant": "text_only_intent",
+      "calibrated_threshold": 35.0,
+      "precision": 0.9559,
+      "recall": 0.8667,
+      "f1": 0.9091,
+      "accuracy": 0.9133,
+      "roc_auc": 0.9267,
+      "pr_auc": 0.9304,
+      "fpr_hard_negatives": 0.0,
+      "hard_neg_fp_count": 0,
+      "hard_neg_total": 64,
+      "fpr_plain_benign": 0.0698,
+      "plain_benign_fp_count": 6,
+      "plain_benign_total": 86,
+      "mean_latency_sec": 3.0,
+      "median_latency_sec": 3.0,
+      "bootstrap_ci": {
+        "f1_ci": [
+          0.8711,
+          0.9412
+        ],
+        "roc_auc_ci": [
+          0.8942,
+          0.9534
+        ],
+        "fpr_hard_ci": [
+          0.0,
+          0.0
+        ]
+      },
+      "confusion_matrix": [
+        [
+          144,
+          6
+        ],
+        [
+          20,
+          130
+        ]
+      ]
+    },
+    "fused_hand_tuned": {
+      "variant": "fused_hand_tuned",
+      "calibrated_threshold": 50.0,
+      "precision": 1.0,
+      "recall": 0.7267,
+      "f1": 0.8417,
+      "accuracy": 0.8633,
+      "roc_auc": 0.9304,
+      "pr_auc": 0.954,
+      "fpr_hard_negatives": 0.0,
+      "hard_neg_fp_count": 0,
+      "hard_neg_total": 64,
+      "fpr_plain_benign": 0.0,
+      "plain_benign_fp_count": 0,
+      "plain_benign_total": 86,
+      "mean_latency_sec": 3.1,
+      "median_latency_sec": 3.0,
+      "bootstrap_ci": {
+        "f1_ci": [
+          0.7901,
+          0.8849
+        ],
+        "roc_auc_ci": [
+          0.8961,
+          0.9594
+        ],
+        "fpr_hard_ci": [
+          0.0,
+          0.0
+        ]
+      },
+      "confusion_matrix": [
+        [
+          150,
+          0
+        ],
+        [
+          41,
+          109
+        ]
+      ]
+    },
+    "fused_stacker": {
+      "variant": "fused_stacker",
+      "calibrated_threshold": 36.5,
+      "precision": 1.0,
+      "recall": 0.7333,
+      "f1": 0.8462,
+      "accuracy": 0.8667,
+      "roc_auc": 0.9277,
+      "pr_auc": 0.9509,
+      "fpr_hard_negatives": 0.0,
+      "hard_neg_fp_count": 0,
+      "hard_neg_total": 64,
+      "fpr_plain_benign": 0.0,
+      "plain_benign_fp_count": 0,
+      "plain_benign_total": 86,
+      "mean_latency_sec": 3.0,
+      "median_latency_sec": 3.0,
+      "bootstrap_ci": {
+        "f1_ci": [
+          0.7954,
+          0.888
+        ],
+        "roc_auc_ci": [
+          0.8926,
+          0.9569
+        ],
+        "fpr_hard_ci": [
+          0.0,
+          0.0
+        ]
+      },
+      "confusion_matrix": [
+        [
+          150,
+          0
+        ],
+        [
+          40,
+          110
+        ]
+      ]
+    }
+  },
+  "per_voice_breakdown": {
+    "test_variant_1": {
+      "n_samples": 76,
+      "precision": 1.0,
+      "recall": 0.7632,
+      "f1": 0.8657,
+      "roc_auc": 0.9404,
+      "fpr_hard_negatives": 0.0
+    },
+    "test_variant_2": {
+      "n_samples": 76,
+      "precision": 1.0,
+      "recall": 0.7368,
+      "f1": 0.8485,
+      "roc_auc": 0.9252,
+      "fpr_hard_negatives": 0.0
+    },
+    "test_variant_3": {
+      "n_samples": 74,
+      "precision": 1.0,
+      "recall": 0.7027,
+      "f1": 0.8254,
+      "roc_auc": 0.9386,
+      "fpr_hard_negatives": 0.0
+    },
+    "test_variant_4": {
+      "n_samples": 74,
+      "precision": 1.0,
+      "recall": 0.7297,
+      "f1": 0.8438,
+      "roc_auc": 0.9116,
+      "fpr_hard_negatives": 0.0
+    }
+  },
+  "error_analysis": {
+    "worst_false_positives": [
+      {
+        "file": "test/test_benign_std_065.wav",
+        "text": "Hi everyone, please remember to submit your timesheets before the end of business today.",
+        "voice_id": "test_variant_1",
+        "is_hard_negative": false,
+        "fused_score": 35.94,
+        "acoustic_score": 50.81,
+        "text_score": 41.34,
+        "cues_fired": [
+          "today"
+        ],
+        "inquiry_detected": false
+      },
+      {
+        "file": "test/test_benign_std_080.wav",
+        "text": "Hi everyone, please remember to submit your timesheets before the end of business today.",
+        "voice_id": "test_variant_4",
+        "is_hard_negative": false,
+        "fused_score": 35.85,
+        "acoustic_score": 50.3,
+        "text_score": 41.34,
+        "cues_fired": [
+          "today"
+        ],
+        "inquiry_detected": false
+      },
+      {
+        "file": "test/test_benign_std_005.wav",
+        "text": "Hi everyone, please remember to submit your timesheets before the end of business today.",
+        "voice_id": "test_variant_1",
+        "is_hard_negative": false,
+        "fused_score": 35.67,
+        "acoustic_score": 49.73,
+        "text_score": 41.34,
+        "cues_fired": [
+          "today"
+        ],
+        "inquiry_detected": false
+      },
+      {
+        "file": "test/test_benign_std_020.wav",
+        "text": "Hi everyone, please remember to submit your timesheets before the end of business today.",
+        "voice_id": "test_variant_4",
+        "is_hard_negative": false,
+        "fused_score": 35.43,
+        "acoustic_score": 47.95,
+        "text_score": 41.34,
+        "cues_fired": [
+          "today"
+        ],
+        "inquiry_detected": false
+      },
+      {
+        "file": "test/test_benign_std_035.wav",
+        "text": "Hi everyone, please remember to submit your timesheets before the end of business today.",
+        "voice_id": "test_variant_3",
+        "is_hard_negative": false,
+        "fused_score": 35.36,
+        "acoustic_score": 47.76,
+        "text_score": 41.34,
+        "cues_fired": [
+          "today"
+        ],
+        "inquiry_detected": false
+      }
+    ],
+    "worst_false_negatives": [
+      {
+        "file": "test/test_scam_052.wav",
+        "text": "Capital One fraud monitoring. Multiple fraudulent purchases occurred on your Mastercard. Provide your personal identification number right away to freeze the account.",
+        "voice_id": "test_variant_4",
+        "fused_score": 4.1,
+        "acoustic_score": 46.36,
+        "text_score": 0.0,
+        "cues_fired": []
+      },
+      {
+        "file": "test/test_scam_060.wav",
+        "text": "Mastercard emergency authorization center. Immediate verification required. Disclose the three digits printed on the rear of your card to cancel the foreign transaction.",
+        "voice_id": "test_variant_4",
+        "fused_score": 4.1,
+        "acoustic_score": 47.87,
+        "text_score": 0.0,
+        "cues_fired": []
+      },
+      {
+        "file": "test/test_scam_090.wav",
+        "text": "Mastercard emergency authorization center. Immediate verification required. Disclose the three digits printed on the rear of your card to cancel the foreign transaction.",
+        "voice_id": "test_variant_2",
+        "fused_score": 4.1,
+        "acoustic_score": 48.42,
+        "text_score": 0.0,
+        "cues_fired": []
+      },
+      {
+        "file": "test/test_scam_082.wav",
+        "text": "Capital One fraud monitoring. Multiple fraudulent purchases occurred on your Mastercard. Provide your personal identification number right away to freeze the account.",
+        "voice_id": "test_variant_2",
+        "fused_score": 4.1,
+        "acoustic_score": 47.81,
+        "text_score": 0.0,
+        "cues_fired": []
+      },
+      {
+        "file": "test/test_scam_112.wav",
+        "text": "Capital One fraud monitoring. Multiple fraudulent purchases occurred on your Mastercard. Provide your personal identification number right away to freeze the account.",
+        "voice_id": "test_variant_4",
+        "fused_score": 4.1,
+        "acoustic_score": 48.2,
+        "text_score": 0.0,
+        "cues_fired": []
+      }
+    ]
+  }
+}
