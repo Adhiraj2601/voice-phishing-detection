@@ -43,3 +43,6 @@ fusion:
     elevated: 50.0
     critical: 75.0
   smoothing_alpha: 0.4
+  model_path: models/stacker_model.joblib
+  fusion_mode: stacker
+  calibrated_threshold: 36.5

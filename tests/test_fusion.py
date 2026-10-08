@@ -74,3 +74,56 @@ def test_scorer_explanation_generation():
     assert expl.overall_risk_score > 50.0
     assert any("[PAYMENT]" in r for r in expl.primary_reasons)
     assert "TERMINATE CALL" in expl.recommended_action or "CAUTION" in expl.recommended_action
+
+
+def test_stacker_fit_predict_and_persistence(tmp_path):
+    import numpy as np
+
+    from vishing_detector.fusion.stacker import LogisticRiskStacker
+
+    stacker = LogisticRiskStacker(random_state=42, cv_folds=2)
+
+    # Synthetic training data: 20 samples, 10 features
+    X = np.random.RandomState(42).randn(20, 10).astype(np.float32)
+    # Give scam samples higher feature values
+    X[10:] += 2.0
+    y = np.array([0] * 10 + [1] * 10, dtype=int)
+
+    stacker.fit(X, y)
+    assert stacker.is_fitted
+    assert 0.0 <= stacker.calibrated_threshold <= 1.0
+
+    prob = stacker.predict_proba(X[0])
+    assert 0.0 <= prob <= 1.0
+
+    risk = stacker.predict_risk_score(X[0])
+    assert 0.0 <= risk <= 100.0
+
+    # Persistence
+    save_file = tmp_path / "test_stacker.joblib"
+    stacker.save(save_file)
+    assert save_file.exists()
+
+    loaded = LogisticRiskStacker.load(save_file)
+    assert loaded.is_fitted
+    assert abs(loaded.predict_proba(X[0]) - prob) < 1e-4
+
+
+def test_scorer_with_stacker_mode():
+    import numpy as np
+
+    from vishing_detector.fusion.stacker import LogisticRiskStacker
+
+    stacker = LogisticRiskStacker(random_state=42, cv_folds=2)
+    X = np.random.RandomState(42).randn(20, 10).astype(np.float32)
+    X[10:] += 2.0
+    y = np.array([0] * 10 + [1] * 10, dtype=int)
+    stacker.fit(X, y)
+
+    scorer = RiskScorer(fusion_mode="stacker", stacker=stacker)
+    anom = AnomalyInferenceResult(is_anomaly=False, anomaly_score=0.1, raw_score=0.2, top_deviating_features=[])
+    nlp = ScamAnalysisResult(text="Hello friend", combined_text_score=0.0)
+
+    assess = scorer.compute_chunk_risk(0, 0.0, 3.0, anom, nlp)
+    assert 0.0 <= assess.smoothed_risk <= 100.0
+    assert assess.risk_level in ["SAFE", "LOW", "ELEVATED", "HIGH", "CRITICAL"]

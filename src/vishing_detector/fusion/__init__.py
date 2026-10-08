@@ -5,5 +5,6 @@ from vishing_detector.fusion.scorer import (
     ChunkRiskAssessment,
     RiskScorer,
 )
+from vishing_detector.fusion.stacker import LogisticRiskStacker
 
-__all__ = ["CallExplanation", "ChunkRiskAssessment", "RiskScorer"]
+__all__ = ["CallExplanation", "ChunkRiskAssessment", "LogisticRiskStacker", "RiskScorer"]

@@ -137,14 +137,27 @@ class VishingDetectionPipeline:
         fusion_cfg = self.config.get("fusion", {})
         weights = fusion_cfg.get("weights", {})
         thresholds = fusion_cfg.get("alert_thresholds", {})
+        fusion_mode = fusion_cfg.get("fusion_mode", "stacker")
+        stacker_p = Path(fusion_cfg.get("model_path", "models/stacker_model.joblib"))
+        stacker_obj = None
+        if stacker_p.exists():
+            try:
+                from vishing_detector.fusion.stacker import LogisticRiskStacker
+                stacker_obj = LogisticRiskStacker.load(stacker_p)
+            except Exception as err:
+                logger.warning("Failed loading stacker model (%s): %s", stacker_p, err)
+
+        elevated_th = float(fusion_cfg.get("calibrated_threshold", thresholds.get("elevated", 50.0)))
         self.scorer = RiskScorer(
             weight_acoustic=weights.get("acoustic_anomaly", 0.35),
             weight_text=weights.get("text_cues", 0.65),
             smoothing_alpha=fusion_cfg.get("smoothing_alpha", 0.4),
             threshold_low=thresholds.get("low", 25.0),
-            threshold_elevated=thresholds.get("elevated", 50.0),
+            threshold_elevated=elevated_th,
             threshold_high=thresholds.get("high", 70.0),
             threshold_critical=thresholds.get("critical", 85.0),
+            fusion_mode=fusion_mode,
+            stacker=stacker_obj,
         )
 
     def _load_config(self, config_path: Optional[Union[str, Path]]) -> dict:
