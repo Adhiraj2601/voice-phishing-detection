@@ -1,0 +1,26 @@
+{
+  "isolation_forest": {
+    "model_type": "isolation_forest",
+    "calibrated_threshold": 0.4993,
+    "val_roc_auc": 0.6211,
+    "val_f1": 0.4173,
+    "val_precision": 0.7436,
+    "val_recall": 0.29,
+    "val_fpr_hard_negatives": 0.15,
+    "val_fpr_plain_benign": 0.1,
+    "num_val_clips": 200
+  },
+  "one_class_svm": {
+    "model_type": "one_class_svm",
+    "calibrated_threshold": 0.862,
+    "val_roc_auc": 0.5747,
+    "val_f1": 0.3582,
+    "val_precision": 0.7059,
+    "val_recall": 0.24,
+    "val_fpr_hard_negatives": 0.1,
+    "val_fpr_plain_benign": 0.1,
+    "num_val_clips": 200
+  },
+  "selected_model": "isolation_forest",
+  "calibrated_threshold": 0.4993
+}

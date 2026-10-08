@@ -67,6 +67,8 @@ data/synthetic/
 !data/samples/sample_benign.wav
 !data/samples/sample_scam.wav
 models/*.joblib
+!models/acoustic_anomaly_model.joblib
+!models/stacker_model.joblib
 models/vosk*
 !models/.gitkeep
 
