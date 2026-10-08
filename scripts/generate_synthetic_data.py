@@ -1,13 +1,13 @@
 """Generates synthetic telephony audio datasets for vishing detection.
 
 Features:
-- >= 100 clips per class for held-out evaluation (benign vs. vishing).
-- Hard negatives: Benign calls legitimately mentioning banks, OTPs, or deliveries to challenge false positives.
-- Distinct voice personas: 8 acoustic variations synthesized from Windows SAPI5 TTS
-  (modulated via SAPI rate, Librosa pitch-shift, and formant adjustments), with 4 held out for test.
-- Telephony simulation applied across ALL splits (train, val, test): 8 kHz downsampling,
-  G.711 u-law codec compression, telecom band-pass filtering (300 Hz - 3400 Hz), and line noise.
-- Separate train (benign baseline), validation (benign + scam for calibration), and test splits.
+- Disjoint splits: train (strictly benign), val (benign + hard negatives + scam), test (held-out).
+- Split by voice variant AND by script: no voice variant or script is shared across splits.
+- Disjoint test scripts: written with independent vocabulary and phrasing to avoid author-lexicon leak.
+- Uniform telephony channel simulation across ALL splits: 8 kHz downsampling, ITU-T G.711 mu-law companding,
+  300 Hz - 3400 Hz bandpass filtering, and line noise with randomized SNR (15 - 30 dB).
+- Scaled sizes: >= 150 clips per class in test (>= 60 hard negatives), >= 100 clips per class in val, 120 train clips.
+- Comprehensive manifest.json logging: split, label, is_hard_negative, voice_id, script_id, tts_engine, augmentations.
 """
 
 from __future__ import annotations
@@ -26,13 +26,14 @@ from typing import Any, Dict, List
 import librosa
 import numpy as np
 import soundfile as sf
-from scipy.signal import butter, sosfilt
+
+from vishing_detector.audio.telephony import apply_telephony_simulation
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Script Collections
+# Script Collections (Strictly Disjoint Across Splits)
 # ---------------------------------------------------------------------------
 
 BENIGN_TRAIN_SCRIPTS = [
@@ -53,7 +54,49 @@ BENIGN_TRAIN_SCRIPTS = [
     "Hey there, the neighborhood committee meeting has been moved to Thursday evening at the community center.",
 ]
 
-BENIGN_TEST_SCRIPTS = [
+VAL_BENIGN_SCRIPTS = [
+    "Hi, I am calling to follow up on the status of my home insurance policy renewal.",
+    "Good morning, could you let me know if the community swimming pool is open today?",
+    "Hello, this is David checking if our flight connection in Denver has been delayed.",
+    "Hi mom, I will be arriving home around six PM so please don't wait for dinner.",
+    "Hello, I am calling the library to check if the audiobooks are available for renewal.",
+    "Hey, can you confirm whether the team presentation is scheduled for room B tomorrow?",
+    "Hi doctor, I am calling to confirm my annual health checkup appointment on Friday.",
+    "Good afternoon, I wanted to ask about the return policy for clothing purchased online.",
+    "Hey, did you remember to turn off the garden sprinkler before leaving the house?",
+    "Hello customer service, I am inquiring about tracking information for order five four three.",
+    "Hi, I would like to reserve two tickets for the contemporary art museum exhibition this Saturday.",
+    "Good evening, just confirming that the dog walker will arrive tomorrow at eleven AM.",
+]
+
+VAL_HARD_NEGATIVE_SCRIPTS = [
+    "Hi, I got a text message with an authentication code. Did someone try to log into my account?",
+    "Hey, our bank texted me asking if I authorized an online purchase. Should I confirm it?",
+    "Hello, I am calling my credit card company to report that my card was lost yesterday.",
+    "Could you tell me why the mobile app is asking to re-enter my debit card PIN number?",
+    "Mom, someone called claiming to be from tech support, but I hung up immediately.",
+    "I saw an unfamiliar transaction on my bank statement and want to verify if it is legitimate.",
+    "The customer service representative told me never to share my one-time passcode over the phone.",
+    "Can you explain why the delivery driver needs a four digit verification code for the parcel?",
+    "I received an email about changing my password, but I am not sure if it was really from IT.",
+    "Did you receive a notification from the bank about two-factor authentication being enabled?",
+]
+
+VAL_SCAM_SCRIPTS = [
+    "This is internal security at Chase. Suspicious debit activity was detected. Read back your OTP code now.",
+    "IRS enforcement bureau: your property is under lien. Pay the settlement fine via Target gift cards immediately.",
+    "Windows security alert: critical spyware active. Download AnyDesk and grant remote access to our technician.",
+    "Federal Trade Commission warning: your accounts are frozen. Wire funds to our safe custody account right now.",
+    "Amazon fraud alert: thousand dollar charge pending. Tell me your credit card CVV and billing zip code.",
+    "Social Security Administration urgent notice: your identity is compromised. Confirm your SSN and PIN to unblock.",
+    "Police arrest warrant: an indictment has been issued. Deposit restitution at a Bitcoin ATM within one hour.",
+    "Apple technical support: iCloud breach in progress. Install TeamViewer and grant remote control immediately.",
+    "Wells Fargo fraud division: emergency notice. Disclose your card number and expiration date right now.",
+    "Treasury department legal citation: unpaid taxes due. Resolve immediately using Google Play gift cards.",
+]
+
+# HELD-OUT TEST SCRIPTS (Independent phrasing and vocabulary)
+TEST_BENIGN_SCRIPTS = [
     "Hi Rachel, I wanted to double check what time the school play starts on Friday evening.",
     "Good afternoon, this is Mark calling from the automotive garage. Your car brake inspection is complete.",
     "Hey dad, I landed at the airport and I am heading to the baggage claim area now.",
@@ -66,156 +109,79 @@ BENIGN_TEST_SCRIPTS = [
     "Hi, I am calling from the animal clinic to confirm that the puppy vaccinations are up to date.",
     "Hey brother, let me know if you want to split the hotel booking for the family reunion.",
     "Hello, this is the pharmacy calling to notify you that your prescription is ready for pickup.",
+    "Hi, could you let me know if the piano teacher has an open slot on Wednesday afternoon?",
+    "Good morning, I am calling to get an estimate for replacing the tires on my road bicycle.",
+    "Hey, did we pack the camping stove and extra batteries for the weekend backpacking trip?",
 ]
 
-# Hard negatives: Legitimate benign calls that mention banks, OTPs, deliveries, or security
-HARD_NEGATIVE_SCRIPTS = [
-    "Hi, I just received an SMS with an OTP code from my bank. Is that normal or should I change my password?",
-    "Hey honey, the grocery delivery courier is outside asking for the four digit verification PIN on the app.",
-    "Hello customer care, I am calling Chase bank support to ask why my debit card was declined at the grocery store.",
-    "Mom, someone called claiming to be from the bank asking for my card numbers, but I told them no and hung up.",
-    "Good morning, I received a text notification about an urgent package delivery requiring a confirmation code.",
-    "Hi officer, I am reporting a suspicious voicemail I received this morning claiming my account was suspended.",
-    "The bank teller told me to set up two-factor authentication with an OTP generator application for safety.",
-    "Can you please show me how to execute a secure wire transfer to my daughter's university tuition account?",
-    "I received a strange letter about an arrest warrant from the IRS, can you help me verify it is a fraudulent scam?",
-    "Hi, I am logging into my online banking portal and it asked me to enter a one-time verification password.",
-    "Hey, did our bank send you an email about updated credit card terms and conditions for next month?",
-    "Hello, I am trying to reset my email password and need you to read me the security code sent to the backup phone.",
-    "The IT department asked everyone to update their passwords and enable two-step authentication today.",
-    "I saw a charge on my credit card statement from an unfamiliar vendor and want to dispute the transaction.",
-    "Could you verify if this text from the postal service asking for delivery redelivery confirmation is genuine?",
+TEST_HARD_NEGATIVE_SCRIPTS = [
+    "Good morning, I received an SMS containing a security token for my banking app, is this an error?",
+    "Dad, the courier at the door is requesting the confirmation digits from the delivery dispatch email.",
+    "Hello dispatch, I am inquiring why my banking profile was locked after entering the wrong passcode.",
+    "I am reporting an unsolicited caller who pretended to represent my credit union this afternoon.",
+    "Can you show me how to activate multi-factor authentication with authenticator application tokens?",
+    "I noticed a suspicious five dollar charge from an online merchant on my checking statement.",
+    "The teller at the credit union advised customers to review their monthly statements for unknown debits.",
+    "Why does the payroll website require me to confirm my identity using a temporary access code?",
+    "I got an automated phone call warning about debit card inactivity, should I contact fraud support?",
+    "My brother told me to beware of fraudulent phone callers asking for debit card security codes.",
+    "Is there a reason customer service would ever request a customer's personal identification number?",
+    "The utility company sent a letter asking us to verify our billing address and payment method.",
+    "I accidentally triggered an account lockout by typing an incorrect login password three times.",
+    "Could you clarify if the postal service sends tracking links that require identity verification?",
+    "I received a push notification asking to approve a login from an unknown device in Dallas.",
 ]
 
-SCAM_TRAIN_SCRIPTS = [
-    "This is Officer Miller from the Internal Revenue Service. A legal arrest warrant has been issued under your social security number. You must immediately pay five hundred dollars in Apple gift cards to stay out of custody.",
-    "Urgent security alert from your bank fraud department. Your checking account has been compromised. Please read back the six digit verification OTP code sent to your phone right now to verify your identity.",
-    "This is Microsoft customer support. Critical warning: your computer is infected with a trojan virus. Install AnyDesk immediately and grant remote access to our technician to fix it.",
-    "Federal Trade Commission final notice. Your bank accounts will be frozen within fifteen minutes. Transfer your funds into our government safe account via wire transfer immediately.",
-    "Amazon security department notice. An unauthorized charge of nine hundred dollars was detected. Do not hang up or tell anyone. Please tell me your credit card number, CVV code, and billing address.",
-    "Law enforcement alert: an indictment has been filed against you. You must pay the fine using a Bitcoin ATM immediately before local police arrive at your home address.",
-    "Social Security Administration urgent message. Your SSN has been terminated due to fraudulent activity. Press one now and provide your mother's maiden name and bank PIN.",
-    "Bank fraud prevention unit: suspicious international wire transfers detected on your debit card. Read back your online banking password to verify account ownership.",
-]
-
-SCAM_TEST_SCRIPTS = [
-    "Department of Justice criminal investigation unit. A federal indictment is pending against your identity. Transfer ten thousand dollars to our safe government custody account immediately.",
-    "Urgent notification from Wells Fargo fraud division. A fraudulent withdrawal was attempted. You must disclose your full card number, expiration date, and CVV code right now.",
-    "Apple technical security alert: your iCloud account has been breached. Download TeamViewer on your desktop and give our agent full remote control.",
-    "This is the police department warrant division. You will be taken into custody within two hours unless you deposit restitution into a Bitcoin ATM right now.",
-    "Target fraud prevention: a suspicious purchase of two thousand dollars was initiated. Keep this call confidential and do not inform your family or bank teller.",
-    "Treasury department legal notice: unpaid tax liabilities must be resolved today using Google Play or Target gift cards to avoid asset seizure.",
-    "Federal Trade Commission security officer speaking. Disclose your one-time passcode to stop unauthorized transactions from clearing your checking balance.",
-    "FBI cyber crime division: we have placed a freeze order on your personal assets. Transfer your savings to our encrypted cryptocurrency wallet immediately.",
-    "Amazon customer loyalty department: you won a ten thousand dollar refund prize. To claim your prize, send five hundred dollars in Steam gift cards right away.",
-    "Border protection customs agency: contraband items were discovered in a parcel registered to your name. Pay the clearance fine via Western Union wire transfer.",
-    "Chase security center: critical compromise detected. Read out your six digit OTP passcode over the phone immediately to secure your funds.",
-    "Windows defender security team: malicious ransomware detected on your network. Grant remote access via UltraViewer to prevent disk erasure.",
-]
-
-VAL_BENIGN_SCRIPTS = [
-    "Hi, I am calling to follow up on the status of my home insurance policy renewal.",
-    "Good morning, could you let me know if the community swimming pool is open today?",
-    "Hello, this is David checking if our flight connection in Denver has been delayed.",
-    "Hi mom, I will be arriving home around six PM so please don't wait for dinner.",
-    "Hello, I am calling the library to check if the audiobooks are available for renewal.",
-    "Hey, can you confirm whether the team presentation is scheduled for room B tomorrow?",
-    "Hi doctor, I am calling to confirm my annual health checkup appointment on Friday.",
-    "Good afternoon, I wanted to ask about the return policy for clothing purchased online.",
-    "Hey, did you remember to turn off the garden sprinkler before leaving the house?",
-    "Hello customer service, I am inquiring about tracking information for order five four three.",
-]
-
-VAL_HARD_NEGATIVE_SCRIPTS = [
-    "Hi, I got a text message with an authentication code. Did someone try to log into my account?",
-    "Hey, our bank texted me asking if I authorized an online purchase. Should I confirm it?",
-    "Hello, I am calling my credit card company to report that my card was lost yesterday.",
-    "Could you tell me why the mobile app is asking to re-enter my debit card PIN number?",
-    "Mom, someone called claiming to be from tech support, but I hung up immediately.",
-]
-
-VAL_SCAM_SCRIPTS = [
-    "This is internal security at Chase. Suspicious debit activity was detected. Read back your OTP code now.",
-    "IRS enforcement bureau: your property is under lien. Pay the settlement fine via Target gift cards immediately.",
-    "Windows security alert: critical spyware active. Download AnyDesk and grant remote access to our technician.",
-    "Federal Trade Commission warning: your accounts are frozen. Wire funds to our safe custody account right now.",
-    "Amazon fraud alert: thousand dollar charge pending. Tell me your credit card CVV and billing zip code.",
+TEST_SCAM_SCRIPTS = [
+    "National Crime Agency warning. A warrant for financial evasion has been authorized. You must settle the outstanding balance using Apple digital vouchers within one hour.",
+    "Citibank risk management dispatch. An illicit debit of four thousand dollars was attempted. Hand over your temporary access digits immediately to void the wire.",
+    "Cyber security response team. Your operating system has been hijacked by keylogger malware. Download QuickSupport right now and share your desktop screen.",
+    "Government revenue commission. Confiscation proceedings have begun on your real estate assets. Dispatch restitution funds through an automated crypto kiosk immediately.",
+    "PayPal anti-fraud bureau. An unauthorized international remittance was submitted. Keep this matter strictly private and state your card expiration and security digits.",
+    "Federal court marshal registry. A felony complaint is documented against your identity. Transfer five thousand dollars into the protected escrow depository immediately.",
+    "Capital One fraud monitoring. Multiple fraudulent purchases occurred on your Mastercard. Provide your personal identification number right away to freeze the account.",
+    "Google technical infrastructure. Unauthorized intrusion identified on your workspace account. Install AnyDesk and grant unattended remote access to prevent mailbox termination.",
+    "Retail fulfillment security. A suspicious delivery was dispatched to an unknown recipient. Do not discuss this call with any store staff and read out your debit card digits.",
+    "Homeland security border enforcement. A package containing restricted contraband was intercepted. Clear the administrative penalty using MoneyGram transfer today.",
+    "Bank of America fraud mitigation unit. We detected unauthorized withdrawals in another state. State your six-digit verification sequence immediately over this secure line.",
+    "Sheriff department judicial enforcement. Deputies have been dispatched to your residence. Liquidate your penalties through the nearest Bitcoin machine to avert arrest.",
+    "Geek Squad renewal defense. An erroneous subscription charge of eight hundred dollars will process. Install TeamViewer immediately so our specialist can reverse the transaction.",
+    "Internal Revenue department final advisory. Your federal tax profile shows deliberate underpayment. Purchase five hundred dollars in vanilla prepaid cards to halt prosecution.",
+    "Mastercard emergency authorization center. Immediate verification required. Disclose the three digits printed on the rear of your card to cancel the foreign transaction.",
 ]
 
 # ---------------------------------------------------------------------------
-# Voice Persona Definitions
-# Note: These 8 speaker personas represent systematic rate (-2 to +2) and
-# pitch (-4.0 to +3.5 semitones) acoustic modulations synthesized from
-# a single Windows SAPI5 voice engine. 4 are reserved for training/validation,
-# and 4 distinct acoustic profiles are held out exclusively for testing.
+# Voice Variants Definitions
+# Exactly 1 underlying physical engine: Windows SAPI5 (Microsoft Zira Desktop).
+# Modulated into 10 distinct, non-overlapping acoustic voice variants across splits.
 # ---------------------------------------------------------------------------
 
 @dataclass
-class VoicePersona:
-    name: str
-    rate: int          # SAPI rate: -2 to +2
-    pitch_shift: float # Semitones: -4.0 to +4.0
-    formant_scale: float # Formant frequency ratio
-    is_test_heldout: bool
+class VoiceVariant:
+    variant_id: str
+    rate: int           # SAPI speech rate: -2 to +2
+    pitch_shift: float  # Pitch shift in semitones: -4.0 to +4.0
+    formant_scale: float
+    split_assignment: str  # 'train', 'val', or 'test'
 
 
-VOICE_PERSONAS: List[VoicePersona] = [
-    # Training Personas
-    VoicePersona("train_female_natural", rate=0, pitch_shift=0.0, formant_scale=1.0, is_test_heldout=False),
-    VoicePersona("train_male_deep", rate=-1, pitch_shift=-3.0, formant_scale=0.92, is_test_heldout=False),
-    VoicePersona("train_female_clear", rate=1, pitch_shift=2.0, formant_scale=1.08, is_test_heldout=False),
-    VoicePersona("train_male_brisk", rate=1, pitch_shift=-1.5, formant_scale=0.96, is_test_heldout=False),
+VOICE_VARIANTS: List[VoiceVariant] = [
+    # Train Variants (Strictly used for Train split)
+    VoiceVariant("train_variant_1", rate=-1, pitch_shift=-2.5, formant_scale=0.94, split_assignment="train"),
+    VoiceVariant("train_variant_2", rate=0, pitch_shift=0.0, formant_scale=1.00, split_assignment="train"),
+    VoiceVariant("train_variant_3", rate=1, pitch_shift=2.0, formant_scale=1.06, split_assignment="train"),
 
-    # Held-out Test Personas (NEVER seen in training)
-    VoicePersona("test_heldout_female_urgent", rate=2, pitch_shift=3.5, formant_scale=1.12, is_test_heldout=True),
-    VoicePersona("test_heldout_male_gravelly", rate=-1, pitch_shift=-4.0, formant_scale=0.88, is_test_heldout=True),
-    VoicePersona("test_heldout_neutral_telecom", rate=0, pitch_shift=1.0, formant_scale=1.02, is_test_heldout=True),
-    VoicePersona("test_heldout_fast_caller", rate=2, pitch_shift=-2.0, formant_scale=0.94, is_test_heldout=True),
+    # Val Variants (Strictly used for Val split)
+    VoiceVariant("val_variant_1", rate=-2, pitch_shift=-3.5, formant_scale=0.90, split_assignment="val"),
+    VoiceVariant("val_variant_2", rate=1, pitch_shift=-1.0, formant_scale=0.97, split_assignment="val"),
+    VoiceVariant("val_variant_3", rate=2, pitch_shift=2.5, formant_scale=1.10, split_assignment="val"),
+
+    # Test Variants (Held out strictly for Test split - NEVER seen in train or val)
+    VoiceVariant("test_variant_1", rate=-1, pitch_shift=-4.0, formant_scale=0.88, split_assignment="test"),
+    VoiceVariant("test_variant_2", rate=0, pitch_shift=1.5, formant_scale=1.03, split_assignment="test"),
+    VoiceVariant("test_variant_3", rate=2, pitch_shift=3.5, formant_scale=1.12, split_assignment="test"),
+    VoiceVariant("test_variant_4", rate=1, pitch_shift=-2.0, formant_scale=0.95, split_assignment="test"),
 ]
-
-
-# ---------------------------------------------------------------------------
-# Telephony Simulation Functions
-# ---------------------------------------------------------------------------
-
-def apply_telephony_simulation(
-    audio_16k: np.ndarray,
-    sr: int = 16000,
-    snr_db: float = 24.0,
-) -> np.ndarray:
-    """Simulate real telephony channel: 8 kHz downsampling, G.711 u-law codec, 300-3400 Hz bandpass, line noise."""
-    # 1. Downsample to 8,000 Hz (telephony standard)
-    audio_8k = librosa.resample(audio_16k, orig_sr=sr, target_sr=8000)
-
-    # 2. Telephone band-pass filter (300 Hz - 3400 Hz)
-    try:
-        sos = butter(4, [300, 3400], btype="bandpass", fs=8000, output="sos")
-        audio_8k = sosfilt(sos, audio_8k)
-    except Exception:
-        pass
-
-    # 3. G.711 u-law compression via quantizing / u-law companding
-    # u-law compression: F(x) = sgn(x) * ln(1 + u|x|) / ln(1 + u), u=255
-    mu = 255.0
-    x = np.clip(audio_8k, -1.0, 1.0)
-    companded = np.sign(x) * np.log(1.0 + mu * np.abs(x)) / np.log(1.0 + mu)
-    # 8-bit quantization
-    quantized = np.round(companded * 127.0) / 127.0
-    # Expanding back
-    expanded = np.sign(quantized) * (1.0 / mu) * ((1.0 + mu) ** np.abs(quantized) - 1.0)
-    audio_8k = expanded
-
-    # 4. Add telephony background line noise (white/pink hiss + 60 Hz mains hum)
-    t_noise = np.linspace(0, len(audio_8k) / 8000.0, len(audio_8k))
-    hum = 0.003 * np.sin(2 * np.pi * 60.0 * t_noise)
-    sig_power = np.mean(audio_8k**2) + 1e-8
-    noise_power = sig_power / (10.0 ** (snr_db / 10.0))
-    noise = np.random.normal(0, np.sqrt(noise_power), len(audio_8k))
-    audio_8k = audio_8k + noise + hum
-
-    # 5. Resample back to 16,000 Hz for standard ingestion
-    audio_resampled = librosa.resample(audio_8k, orig_sr=8000, target_sr=sr)
-    return np.clip(audio_resampled, -1.0, 1.0).astype(np.float32)
 
 
 def _batch_synthesize_tts_windows(
@@ -226,7 +192,6 @@ def _batch_synthesize_tts_windows(
     if platform.system() != "Windows":
         return
 
-    # Build commands for a single powershell script
     ps_lines = [
         "Add-Type -AssemblyName System.Speech",
         "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer",
@@ -235,7 +200,7 @@ def _batch_synthesize_tts_windows(
     for item in items:
         out_path = str(item["wav_path"]).replace(os.sep, "/")
         clean_text = item["text"].replace('"', '\\"').replace("'", "")
-        rate = item["persona"].rate
+        rate = item["variant"].rate
         ps_lines.append(f"$s.Rate = {rate}")
         ps_lines.append(f"$s.SetOutputToWaveFile('{out_path}')")
         ps_lines.append(f"$s.Speak('{clean_text}')")
@@ -249,7 +214,7 @@ def _batch_synthesize_tts_windows(
         subprocess.run(
             ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(temp_ps1)],
             capture_output=True,
-            timeout=180,
+            timeout=300,
             check=True,
         )
     except Exception as err:
@@ -276,27 +241,21 @@ def _synthesize_harmonic_fallback(text: str, out_wav: Path, sr: int = 16000, f0_
     sf.write(str(out_wav), np.clip(audio, -1.0, 1.0).astype(np.float32), sr, subtype="PCM_16")
 
 
-# ---------------------------------------------------------------------------
-# Dataset Generation Pipeline
-# ---------------------------------------------------------------------------
-
 def generate_large_scale_dataset(
     output_dir: Path = Path("data/synthetic"),
-    num_benign_train: int = 60,
-    num_benign_val: int = 20,
-    num_scam_val: int = 20,
-    num_benign_test: int = 110,
-    num_scam_test: int = 110,
+    num_benign_train: int = 120,
+    num_benign_val: int = 100,
+    num_scam_val: int = 100,
+    num_benign_test: int = 150,
+    num_scam_test: int = 150,
 ) -> Dict[str, Any]:
-    """Generate telephony-simulated dataset with train, val, and held-out test splits.
+    """Generate telephony-simulated dataset with disjoint train, val, and test splits.
 
-    Includes:
-    - Train split: strictly benign recordings for acoustic baseline training.
-    - Val split: benign (including hard negatives) and scam calls for threshold calibration and fusion tuning.
-    - Test split: held-out benign recordings (with hard negatives) and held-out scam recordings
-      using held-out voice personas and scripts.
-    - Uniform telephony simulation across ALL splits: 8 kHz downsampling, G.711 u-law companding,
-      band-pass filter (300-3400 Hz), and line noise.
+    Guarantees:
+    - Zero voice leakage: train, val, and test use disjoint voice variants.
+    - Zero script leakage: train, val, and test use disjoint script collections.
+    - Test split uses distinct vocabulary scripts to evaluate generalizability.
+    - Uniform telephony channel simulation (8 kHz + G.711 mu-law + bandpass + line noise).
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     raw_dir = output_dir / "raw_tts"
@@ -309,135 +268,214 @@ def generate_large_scale_dataset(
     val_dir.mkdir(parents=True, exist_ok=True)
     test_dir.mkdir(parents=True, exist_ok=True)
 
-    train_personas = [p for p in VOICE_PERSONAS if not p.is_test_heldout]
-    test_personas = [p for p in VOICE_PERSONAS if p.is_test_heldout]
+    train_variants = [v for v in VOICE_VARIANTS if v.split_assignment == "train"]
+    val_variants = [v for v in VOICE_VARIANTS if v.split_assignment == "val"]
+    test_variants = [v for v in VOICE_VARIANTS if v.split_assignment == "test"]
 
     tts_jobs: List[Dict[str, Any]] = []
     manifest: List[Dict[str, Any]] = []
 
-    # 1. Benign Training Set (Train Split - Telephony Simulated)
+    # 1. Benign Training Set (Train Split - Strictly Benign Telephony)
     logger.info("Scheduling %d benign training clips...", num_benign_train)
     for i in range(num_benign_train):
-        script = BENIGN_TRAIN_SCRIPTS[i % len(BENIGN_TRAIN_SCRIPTS)]
-        persona = train_personas[i % len(train_personas)]
+        script_idx = i % len(BENIGN_TRAIN_SCRIPTS)
+        script = BENIGN_TRAIN_SCRIPTS[script_idx]
+        variant = train_variants[i % len(train_variants)]
         filename = f"train_benign_{i+1:03d}.wav"
         target_path = train_dir / filename
         raw_path = raw_dir / f"raw_train_benign_{i+1:03d}.wav"
 
-        tts_jobs.append({"text": script, "persona": persona, "wav_path": raw_path, "target_path": target_path, "split": "train", "label": 0, "is_hard_negative": False})
+        tts_jobs.append({
+            "text": script,
+            "variant": variant,
+            "wav_path": raw_path,
+            "target_path": target_path,
+            "split": "train",
+            "label": 0,
+            "is_hard_negative": False,
+            "script_id": f"train_benign_{script_idx:02d}",
+        })
 
-    # 2. Validation Set (For Anomaly Calibration and Fusion Tuning)
-    num_val_hard_neg = int(num_benign_val * 0.40)
-    num_val_std_benign = num_benign_val - num_val_hard_neg
-    logger.info("Scheduling %d validation clips (%d benign [%d hard neg] + %d scam)...", num_benign_val + num_scam_val, num_benign_val, num_val_hard_neg, num_scam_val)
+    # 2. Validation Set (Benign + Hard Negatives + Scam)
+    num_val_hard_neg = int(num_benign_val * 0.40)  # 40 hard negatives
+    num_val_std_benign = num_benign_val - num_val_hard_neg  # 60 standard benign
+    logger.info("Scheduling %d val clips (%d std benign + %d hard neg + %d scam)...",
+                num_benign_val + num_scam_val, num_val_std_benign, num_val_hard_neg, num_scam_val)
 
     for i in range(num_val_std_benign):
-        script = VAL_BENIGN_SCRIPTS[i % len(VAL_BENIGN_SCRIPTS)]
-        persona = train_personas[i % len(train_personas)]
-        filename = f"val_benign_{i+1:03d}.wav"
+        script_idx = i % len(VAL_BENIGN_SCRIPTS)
+        script = VAL_BENIGN_SCRIPTS[script_idx]
+        variant = val_variants[i % len(val_variants)]
+        filename = f"val_benign_std_{i+1:03d}.wav"
         target_path = val_dir / filename
-        raw_path = raw_dir / f"raw_val_benign_{i+1:03d}.wav"
-        tts_jobs.append({"text": script, "persona": persona, "wav_path": raw_path, "target_path": target_path, "split": "val", "label": 0, "is_hard_negative": False})
+        raw_path = raw_dir / f"raw_val_benign_std_{i+1:03d}.wav"
+        tts_jobs.append({
+            "text": script,
+            "variant": variant,
+            "wav_path": raw_path,
+            "target_path": target_path,
+            "split": "val",
+            "label": 0,
+            "is_hard_negative": False,
+            "script_id": f"val_benign_std_{script_idx:02d}",
+        })
 
     for i in range(num_val_hard_neg):
-        script = VAL_HARD_NEGATIVE_SCRIPTS[i % len(VAL_HARD_NEGATIVE_SCRIPTS)]
-        persona = train_personas[i % len(train_personas)]
+        script_idx = i % len(VAL_HARD_NEGATIVE_SCRIPTS)
+        script = VAL_HARD_NEGATIVE_SCRIPTS[script_idx]
+        variant = val_variants[i % len(val_variants)]
         filename = f"val_benign_hard_{i+1:03d}.wav"
         target_path = val_dir / filename
         raw_path = raw_dir / f"raw_val_benign_hard_{i+1:03d}.wav"
-        tts_jobs.append({"text": script, "persona": persona, "wav_path": raw_path, "target_path": target_path, "split": "val", "label": 0, "is_hard_negative": True})
+        tts_jobs.append({
+            "text": script,
+            "variant": variant,
+            "wav_path": raw_path,
+            "target_path": target_path,
+            "split": "val",
+            "label": 0,
+            "is_hard_negative": True,
+            "script_id": f"val_hard_neg_{script_idx:02d}",
+        })
 
     for i in range(num_scam_val):
-        script = VAL_SCAM_SCRIPTS[i % len(VAL_SCAM_SCRIPTS)]
-        persona = train_personas[i % len(train_personas)]
+        script_idx = i % len(VAL_SCAM_SCRIPTS)
+        script = VAL_SCAM_SCRIPTS[script_idx]
+        variant = val_variants[i % len(val_variants)]
         filename = f"val_scam_{i+1:03d}.wav"
         target_path = val_dir / filename
         raw_path = raw_dir / f"raw_val_scam_{i+1:03d}.wav"
-        tts_jobs.append({"text": script, "persona": persona, "wav_path": raw_path, "target_path": target_path, "split": "val", "label": 1, "is_hard_negative": False})
+        tts_jobs.append({
+            "text": script,
+            "variant": variant,
+            "wav_path": raw_path,
+            "target_path": target_path,
+            "split": "val",
+            "label": 1,
+            "is_hard_negative": False,
+            "script_id": f"val_scam_{script_idx:02d}",
+        })
 
-    # 3. Held-Out Test Set (Telephony Simulated)
-    num_hard_neg = int(num_benign_test * 0.45) # ~49 hard negatives
-    num_standard_benign_test = num_benign_test - num_hard_neg
-    logger.info("Scheduling %d held-out benign test clips (%d standard + %d hard negatives)...", num_benign_test, num_standard_benign_test, num_hard_neg)
+    # 3. Test Set (Held-Out Benign + Held-Out Hard Negatives + Held-Out Scam)
+    num_test_hard_neg = int(num_benign_test * 0.433)  # 65 hard negatives
+    num_test_std_benign = num_benign_test - num_test_hard_neg  # 85 standard benign
+    logger.info("Scheduling %d test clips (%d std benign + %d hard neg + %d scam)...",
+                num_benign_test + num_scam_test, num_test_std_benign, num_test_hard_neg, num_scam_test)
 
-    for i in range(num_standard_benign_test):
-        script = BENIGN_TEST_SCRIPTS[i % len(BENIGN_TEST_SCRIPTS)]
-        persona = test_personas[i % len(test_personas)]
+    for i in range(num_test_std_benign):
+        script_idx = i % len(TEST_BENIGN_SCRIPTS)
+        script = TEST_BENIGN_SCRIPTS[script_idx]
+        variant = test_variants[i % len(test_variants)]
         filename = f"test_benign_std_{i+1:03d}.wav"
         target_path = test_dir / filename
         raw_path = raw_dir / f"raw_test_benign_std_{i+1:03d}.wav"
+        tts_jobs.append({
+            "text": script,
+            "variant": variant,
+            "wav_path": raw_path,
+            "target_path": target_path,
+            "split": "test",
+            "label": 0,
+            "is_hard_negative": False,
+            "script_id": f"test_benign_std_{script_idx:02d}",
+        })
 
-        tts_jobs.append({"text": script, "persona": persona, "wav_path": raw_path, "target_path": target_path, "split": "test", "label": 0, "is_hard_negative": False})
-
-    for i in range(num_hard_neg):
-        script = HARD_NEGATIVE_SCRIPTS[i % len(HARD_NEGATIVE_SCRIPTS)]
-        persona = test_personas[i % len(test_personas)]
+    for i in range(num_test_hard_neg):
+        script_idx = i % len(TEST_HARD_NEGATIVE_SCRIPTS)
+        script = TEST_HARD_NEGATIVE_SCRIPTS[script_idx]
+        variant = test_variants[i % len(test_variants)]
         filename = f"test_benign_hard_{i+1:03d}.wav"
         target_path = test_dir / filename
         raw_path = raw_dir / f"raw_test_benign_hard_{i+1:03d}.wav"
+        tts_jobs.append({
+            "text": script,
+            "variant": variant,
+            "wav_path": raw_path,
+            "target_path": target_path,
+            "split": "test",
+            "label": 0,
+            "is_hard_negative": True,
+            "script_id": f"test_hard_neg_{script_idx:02d}",
+        })
 
-        tts_jobs.append({"text": script, "persona": persona, "wav_path": raw_path, "target_path": target_path, "split": "test", "label": 0, "is_hard_negative": True})
-
-    # 4. Scam Test Set (Held-Out Test Split)
-    logger.info("Scheduling %d held-out scam test clips...", num_scam_test)
     for i in range(num_scam_test):
-        script = SCAM_TEST_SCRIPTS[i % len(SCAM_TEST_SCRIPTS)]
-        persona = test_personas[i % len(test_personas)]
+        script_idx = i % len(TEST_SCAM_SCRIPTS)
+        script = TEST_SCAM_SCRIPTS[script_idx]
+        variant = test_variants[i % len(test_variants)]
         filename = f"test_scam_{i+1:03d}.wav"
         target_path = test_dir / filename
         raw_path = raw_dir / f"raw_test_scam_{i+1:03d}.wav"
+        tts_jobs.append({
+            "text": script,
+            "variant": variant,
+            "wav_path": raw_path,
+            "target_path": target_path,
+            "split": "test",
+            "label": 1,
+            "is_hard_negative": False,
+            "script_id": f"test_scam_{script_idx:02d}",
+        })
 
-        tts_jobs.append({"text": script, "persona": persona, "wav_path": raw_path, "target_path": target_path, "split": "test", "label": 1, "is_hard_negative": False})
-
-    # Execute TTS Generation
+    # Execute batch speech synthesis
     logger.info("Synthesizing %d total speech clips...", len(tts_jobs))
     _batch_synthesize_tts_windows(tts_jobs, raw_dir)
 
     # Process acoustic perturbations & uniform telephony simulation
-    logger.info("Applying acoustic persona shifts and uniform telephony channel simulation...")
+    logger.info("Applying voice variant shifts and telephony channel simulation...")
     for job in tts_jobs:
         raw_p = job["wav_path"]
         target_p = job["target_path"]
-        persona: VoicePersona = job["persona"]
+        variant: VoiceVariant = job["variant"]
         label = job["label"]
 
-        # Ensure raw audio exists
         if not raw_p.exists() or raw_p.stat().st_size < 1000:
-            f0_base = 130.0 + persona.pitch_shift * 8.0
+            f0_base = 130.0 + variant.pitch_shift * 8.0
             _synthesize_harmonic_fallback(job["text"], raw_p, sr=16000, f0_base=f0_base)
 
         try:
             y, sr = librosa.load(str(raw_p), sr=16000)
 
-            # Apply persona pitch shifting
-            if abs(persona.pitch_shift) > 0.1:
-                y = librosa.effects.pitch_shift(y, sr=sr, n_steps=persona.pitch_shift)
+            # Apply variant pitch shifting
+            if abs(variant.pitch_shift) > 0.1:
+                y = librosa.effects.pitch_shift(y, sr=sr, n_steps=variant.pitch_shift)
 
             # For scam callers, apply slightly elevated cadence
+            cadence_rate = 1.0
             if label == 1:
-                y = librosa.effects.time_stretch(y, rate=random.choice([1.06, 1.12, 1.18]))
+                cadence_rate = random.choice([1.06, 1.12, 1.18])
+                y = librosa.effects.time_stretch(y, rate=cadence_rate)
 
-            # Apply identical telephony channel simulation across ALL splits (8 kHz + G.711 u-law + bandpass + noise)
-            y = apply_telephony_simulation(y, sr=16000, snr_db=random.uniform(20.0, 28.0))
-            codec_desc = "g711_mulaw_8k_simulated"
+            # Randomized SNR between 15.0 and 30.0 dB
+            chosen_snr = round(float(random.uniform(15.0, 30.0)), 2)
+
+            # Apply identical telephony channel simulation across ALL splits
+            y = apply_telephony_simulation(y, sr=16000, snr_db=chosen_snr)
 
             # Write finalized 16 kHz WAV
             sf.write(str(target_p), y, sr, subtype="PCM_16")
             duration = float(len(y) / sr)
 
-            manifest.append(
-                {
-                    "file": str(target_p.relative_to(output_dir)).replace(os.sep, "/"),
-                    "split": job["split"],
-                    "label": label,
-                    "label_name": "vishing" if label == 1 else "benign",
-                    "is_hard_negative": job["is_hard_negative"],
-                    "voice_persona": persona.name,
-                    "codec": codec_desc,
-                    "duration": round(duration, 2),
-                    "text": job["text"],
-                }
-            )
+            manifest.append({
+                "file": str(target_p.relative_to(output_dir)).replace(os.sep, "/"),
+                "split": job["split"],
+                "label": label,
+                "label_name": "vishing" if label == 1 else "benign",
+                "is_hard_negative": job["is_hard_negative"],
+                "voice_id": variant.variant_id,
+                "script_id": job["script_id"],
+                "tts_engine": "windows_sapi5_zira" if platform.system() == "Windows" else "harmonic_fallback",
+                "duration": round(duration, 2),
+                "text": job["text"],
+                "augmentation_parameters": {
+                    "rate": variant.rate,
+                    "pitch_shift_st": variant.pitch_shift,
+                    "formant_scale": variant.formant_scale,
+                    "cadence_stretch": cadence_rate,
+                    "snr_db": chosen_snr,
+                    "telephony_codec": "g711_mulaw_8k",
+                    "bandpass_hz": [300, 3400],
+                },
+            })
         except Exception as err:
             logger.error("Failed processing %s: %s", target_p.name, err)
 
@@ -498,11 +536,11 @@ def generate_large_scale_dataset(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Synthetic telephony dataset generator for vishing detection.")
     parser.add_argument("--output-dir", type=str, default="data/synthetic", help="Output directory path")
-    parser.add_argument("--train-benign", type=int, default=60, help="Number of benign training samples")
-    parser.add_argument("--val-benign", type=int, default=20, help="Number of benign validation samples")
-    parser.add_argument("--val-scam", type=int, default=20, help="Number of scam validation samples")
-    parser.add_argument("--test-benign", type=int, default=110, help="Number of benign test samples (>= 100)")
-    parser.add_argument("--test-scam", type=int, default=110, help="Number of scam test samples (>= 100)")
+    parser.add_argument("--train-benign", type=int, default=120, help="Number of benign training samples")
+    parser.add_argument("--val-benign", type=int, default=100, help="Number of benign validation samples")
+    parser.add_argument("--val-scam", type=int, default=100, help="Number of scam validation samples")
+    parser.add_argument("--test-benign", type=int, default=150, help="Number of benign test samples (>= 150)")
+    parser.add_argument("--test-scam", type=int, default=150, help="Number of scam test samples (>= 150)")
     args = parser.parse_args()
 
     generate_large_scale_dataset(
