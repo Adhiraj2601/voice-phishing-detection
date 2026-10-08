@@ -60,8 +60,8 @@ The system was evaluated on a held-out synthetic telephony test benchmark ($N = 
 
 | Version | Evaluation Setup | Acoustic-Only F1 | Text-Only F1 | Fused F1 | Hard-Neg FPR | Notes |
 | :--- | :--- | :---: | :---: | :---: | :---: | :--- |
-| **v0.1 Baseline** | Clean audio train, telephony test ($N = 30$) | 0.5000 | 0.8800 | 0.8800 | 73.5% | Severe channel mismatch caused 100% acoustic FPR. |
-| **v0.2 Improved** | Uniform telephony, held-out scripts & voices ($N = 300$) | 0.2911 | 0.9091 | **0.8462** | **0.0%** | Disjoint splits, intent-aware cues, learned stacker. |
+| **v0.1 Baseline** | Clean audio train, telephony test ($N = 30$) | 0.5000 | 0.8800 | 0.8800 | 73.5% (36/49) | Initial exploratory dataset; channel mismatch caused 100% acoustic FPR. |
+| **v0.2 Improved** | Uniform telephony, held-out scripts & voices ($N = 300$) | 0.2911 | **0.9091** | 0.8462 | **0.0%** (0/64) | Disjoint splits, intent-aware cues (0/64 hard-neg FP, text F1 0.9091, stacker F1 0.8462). |
 
 ### Component Ablation Study ($N = 300$ Held-Out Test Audio)
 
@@ -74,21 +74,25 @@ All thresholds were selected and frozen on the validation split prior to evaluat
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | **Acoustic-Only (Isolation Forest)** | 0.4921 | 0.2067 | 0.2911 [0.209, 0.374] | 0.5463 [0.479, 0.611] | 0.5350 | 31.2% ($20/64$) | 14.0% ($12/86$) | 6.47s (median 7.0s) |
 | **Text-Only (Legacy Bare Keywords)** | 0.8602 | 0.5333 | 0.6584 [0.582, 0.724] | 0.7331 [0.687, 0.779] | 0.7397 | 20.3% ($13/64$) | 0.0% ($0/86$) | 3.00s (median 3.0s) |
-| **Text-Only (Intent-Aware Rules)** | 0.9559 | 0.8667 | **0.9091** [0.871, 0.941] | 0.9267 [0.894, 0.953] | 0.9320 | **0.0%** ($0/64$) | 4.7% ($4/86$) | 3.00s (median 3.0s) |
-| **Fused Multi-Modal (Hand-Tuned)** | 1.0000 | 0.7267 | 0.8417 [0.790, 0.885] | 0.9304 [0.896, 0.959] | 0.9515 | **0.0%** ($0/64$) | 0.0% ($0/86$) | 3.10s (median 3.0s) |
-| **Fused Multi-Modal (Learned Stacker)** | **1.0000** | 0.7333 | 0.8462 [0.795, 0.888] | **0.9277** [0.893, 0.957] | **0.9526** | **0.0%** ($0/64$) | **0.0%** ($0/86$) | 3.00s (median 3.0s) |
+| **Text-Only (Intent-Aware Rules)** | 0.9559 | **0.8667** | **0.9091** [0.871, 0.941] | 0.9267 [0.894, 0.953] | 0.9304 | **0.0%** ($0/64$) | 7.0% ($6/86$) | 3.00s (median 3.0s) |
+| **Fused Multi-Modal (Hand-Tuned)** | **1.0000** | 0.7267 | 0.8417 [0.790, 0.885] | **0.9304** [0.896, 0.959] | **0.9540** | **0.0%** ($0/64$) | **0.0%** ($0/86$) | 3.10s (median 3.0s) |
+| **Fused Multi-Modal (Learned Stacker)** | **1.0000** | 0.7333 | 0.8462 [0.795, 0.888] | 0.9277 [0.893, 0.957] | 0.9509 | **0.0%** ($0/64$) | **0.0%** ($0/86$) | 3.00s (median 3.0s) |
 
-### Key Findings & Analysis
+### Key Findings & Empirical Analysis
 
-1. **Acoustic Anomaly Detection is the Weakest Link**: Under realistic 8 kHz G.711 telephony simulation, the acoustic anomaly model achieved an ROC-AUC of only `0.5463` and an F1 of `0.2911`. It provides barely above chance-level discrimination when evaluating synthetic voice variants. It cannot serve as a reliable standalone alert system.
-2. **Acoustic Signal Functions as a Regularizer in Fusion**: While acoustic-only performance is low, fusing acoustic scores into the learned stacker acts as a regularizer: it completely eliminated the 4.7% plain-benign false alarms present in the text-only model, yielding **1.0000 precision** with **zero false alarms** ($0/150$) across all benign test clips. However, this comes at the expense of recall ($0.7333$ vs. $0.8667$), as borderline text cases with neutral acoustics are rejected.
-3. **Intent-Aware Demands Eliminate Hard-Negative False Alarms**: Requiring demand verbs within 8 tokens of credential keywords while down-weighting question patterns cut hard-negative false alarms from `20.3%` down to **`0.0%` ($0/64$)**.
-4. **Generalization Limits on Novel Phrasing**: On held-out test scripts with novel vocabulary, the text model achieved 86.67% recall rather than the 100% seen on validation. Missing cues occurred when callers used descriptive paraphrasing (*"personal identification number"* instead of *"pin"*, or *"three digits on the rear of your card"* instead of *"cvv"*).
-5. **Detection Latency**: Alert latency averaged **3.00 seconds** (the duration of the initial sliding window). Because the pipeline processes 3-second windows with 1-second hops, detection latency is bounded below by 3.0 seconds.
+1. **Acoustic Anomaly Detection is Near Chance**: Under realistic 8 kHz G.711 telephony simulation, the acoustic anomaly model achieved an ROC-AUC of only `0.5463` [95% CI: 0.479, 0.611] and an F1 of `0.2911` [0.209, 0.375]. Standalone acoustic features provide virtually no discriminative power over synthetic voice variants under telephony compression, and cannot serve as an alert system on their own.
+2. **Text Drives Detection; Fusion Trades Recall for Precision**: Text-only intent-aware rules achieved the highest overall F1 score (`0.9091` [0.871, 0.941]) with `0.8667` recall (130/150 scams detected). Fused models (hand-tuned F1 `0.8417` [0.790, 0.885]; learned stacker F1 `0.8462` [0.795, 0.888]) do **not** outperform text on F1 or ROC-AUC. Instead, fusion enforces a stricter operating point: it trades 13.3 percentage points of recall (missing 20 additional scam calls: 40 missed vs. 20 missed) to eliminate the 6 false alarms on plain benign calls (from 6/86 down to 0/86). For financial fraud defense, missing 20 real scams to prevent 6 false alarms is an unfavorable trade-off.
+3. **The "Acoustic Regularizer" Hypothesis vs. Stricter Threshold**: Because acoustic ROC-AUC is near chance (0.5463), claiming acoustics act as an intelligent regularizer is an unverified hypothesis. Rather, the fused stacker is simply sitting at a stricter decision boundary that demands higher joint confidence.
+4. **Stacker vs. Hand-Tuned Fusion**: The learned logistic stacker (F1 `0.8462`) and hand-tuned fusion (F1 `0.8417`) have completely overlapping 95% confidence intervals ([0.795, 0.888] vs [0.790, 0.885]), representing a difference of only a single true positive (110 vs. 109). The stacker offers systematic probability calibration rather than a statistically significant performance gain.
+5. **Statistical Reality of Zero False Positives**: On 150 negative test clips (86 plain benign + 64 hard negatives), the fused model produced 0 false positives. By the statistical Rule of Three ($3/N$), a zero-event outcome on $N = 150$ is still compatible with an underlying true false positive rate of up to $\approx 2.0\%$. Furthermore, the difference between 0/86 and 6/86 false positives is only marginally significant (Fisher's exact $p \approx 0.03$).
+6. **Intent-Aware Demands Cut Hard-Negative False Alarms**: Requiring directive demand verbs within 8 tokens of credential keywords while suppressing question contexts reduced hard-negative false alarms from `20.3%` (13/64) down to `0.0%` (0/64) on the held-out test set. (In the earlier v0.1 exploratory evaluation on older scripts, legacy bare keywords produced a `73.5%` [36/49] false positive rate).
+7. **Acoustic Confound Check & Voice Balance**: Voice variants are strictly balanced 50/50 across classes in both validation (34/33/33 per class) and test (38/38/37/37 per class). Although a slight cadence stretch (1.06–1.18x) was applied to synthetic scam scripts during generation, the acoustic model's near-chance test AUC (0.5463) confirms it did not exploit or overfit to this synthetic artifact under telephony channel degradation.
+8. **Generalization Limits on Novel Phrasing**: On held-out test scripts with independent phrasing, the text model missed 20 scam calls (86.67% recall). All 20 misses stemmed from descriptive paraphrasing (*"personal identification number"* instead of *"pin"*, *"three digits printed on the rear of your card"* instead of *"cvv"*, or *"restitution funds through an automated crypto kiosk"* instead of *"bitcoin"*).
+9. **Detection Latency**: Alert latency averaged **3.00 seconds** (the duration of the initial sliding window). Because the pipeline processes 3-second windows with 1-second hops, detection latency is bounded below by 3.0 seconds.
 
 ### Per-Voice-Variant Performance Breakdown (Fused Stacker)
 
-Evaluated across the 4 held-out test speaker profiles ($N = 74\text{--}76$ per variant):
+Evaluated across the 4 held-out test speaker profiles (N = 74–76 per variant):
 
 | Voice Profile | Pitch / Rate Modulation | Test Samples | Precision | Recall | F1 Score | ROC-AUC | Hard-Neg FPR |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
@@ -120,8 +124,8 @@ Performance remained stable across pitch and rate variations, confirming that de
 ## What I Learned (Engineering Post-Mortem)
 
 1. **Channel Mismatch Breaks Anomaly Detectors**: In v0.1, the anomaly model was trained on clean audio and tested on 8 kHz G.711 telephony audio, causing a 100% false alarm rate. The detector had learned acoustic channel differences rather than vocal anomalies. Uniform telephony simulation across all splits is mandatory.
-2. **Lexicon Matching Struggles on Hard Negatives Without Intent Constraints**: Bare keyword matching fails when legitimate callers discuss security codes or banks. Enforcing directive demand phrasing and suppressing question contexts cut hard-negative false positives from 73% to 0%.
-3. **Multi-Modal Fusion Requires Empirical Calibration**: Heuristic synergy multipliers can mask underlying weaknesses. Implementing a learned logistic stacker with 5-fold Platt scaling made probability calibration explicit and reproducible.
+2. **Lexicon Matching Struggles on Hard Negatives Without Intent Constraints**: Bare keyword matching fails when legitimate callers discuss security codes or banks. Enforcing directive demand phrasing and suppressing question contexts cut hard-negative false positives from 20.3% down to 0.0% on the held-out test set (and from 73.5% down to 0.0% on the exploratory v0.1 benchmark).
+3. **Multi-Modal Fusion Can Hurt Fraud Recall**: Fusing a near-chance acoustic model with text did not create multimodal synergy; it simply created a stricter gate that traded 13 points of scam recall (20 missed scams) for eliminating 6 benign false alarms. In fraud defense, sacrificing recall to minimize low-level false alarms is a questionable operational trade-off.
 4. **Synthetic Benchmarks Overstate Performance**: When scripts and lexicons share author assumptions, recall appears deceptively high. Introducing held-out scripts with novel vocabulary revealed real-world edge cases where attackers avoid exact keywords.
 
 ---
